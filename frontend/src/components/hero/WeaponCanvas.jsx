@@ -10,6 +10,12 @@ const YAW_REST_OFFSET = Math.PI / 2
 // How far behind the measured eyepiece the camera settles at full dolly.
 const EYE_STANDOFF = 1.35
 
+// Driver value by which the camera has slid onto the scope's optical axis.
+// Deliberately well before DOLLY_END: being on-axis is what keeps the glass
+// concentric with the rifle's housing ring, and that has to be true while the
+// rifle is still on screen (it fades out around 0.74–0.80).
+const ALIGN_END = 0.67
+
 // Camera finishes its dolly (t=1) at this driver value; it then holds while
 // the end-bloom carries the circle to fullscreen and the text settles in.
 const DOLLY_END = 0.88
@@ -19,6 +25,27 @@ const FULLSCREEN_START = 0.94
 // is 608 verts; 48 reproduces the same centre/radius to 0.1px for a fraction
 // of the work.
 const RING_SAMPLES = 48
+
+// awp.glb's lens cone is not concentric with the housing it sits in: the
+// rifle's silver rim opening is offset from the glass and very slightly wider.
+// The sight picture has to fill the RIM (that's the hole you look through),
+// not the glass — otherwise a crescent of dark scope body shows between the
+// two on the offset side. A bigger radius alone can't close it: measured from
+// the glass's centre the rim's inner edge runs 142.8→162.8px, so any circle
+// wide enough to cover the far side buries the rim on the near side.
+//
+// Measured off the render by least-squares-fitting the rim's inner edge (120
+// radial samples) and comparing to the projected glass, at two zooms:
+//   driver 0.711  r=66.0   Δ(-2.2,+2.9)px  ratio 1.0101
+//   driver 0.762  r=151.1  Δ(-5.0,+7.1)px  ratio 1.0107
+// The deltas scale with the radius, so it's a fixed offset in the model rather
+// than parallax or a lighting artefact. Held as a fraction of the rim radius
+// in the rim's own plane (the long-axis component came out 0, as a pure
+// concentricity error should), so it survives any pose or zoom.
+// Re-exporting awp.glb invalidates these — re-measure, don't nudge.
+const BORE_OFFSET_U = 0.0332
+const BORE_OFFSET_W = -0.0455
+const BORE_SCALE = 1.0104
 
 const lerp = (a, b, t) => a + (b - a) * t
 const clamp01 = (t) => Math.min(1, Math.max(0, t))
@@ -107,10 +134,17 @@ function WeaponModel({ driver, scopeWrapRef, crosshairRef }) {
           }
           return out
         }
-        lensRings = groups.map((ring) => ({
-          pts: evenly(ring),
-          center: centroid(ring),
-        }))
+        lensRings = groups.map((ring) => {
+          const c = centroid(ring)
+          const r =
+            ring.reduce((acc, q) => acc + Math.hypot(q[u] - c[u], q[w] - c[w]), 0) /
+            ring.length
+          // Where the housing's rim opening sits, relative to this rim.
+          const bore = c.clone()
+          bore[u] += BORE_OFFSET_U * r
+          bore[w] += BORE_OFFSET_W * r
+          return { pts: evenly(ring), center: c, bore }
+        })
       }
     }
 
@@ -252,14 +286,23 @@ function WeaponModel({ driver, scopeWrapRef, crosshairRef }) {
     // Retarget the scope dive onto the measured eyepiece. Without this the
     // camera aims at a hardcoded point that misses the real glass by enough
     // to push it outside the narrowed FOV entirely.
+    //
+    // Line up with the optical axis (ALIGN_END) well before finishing the push
+    // in (DOLLY_END). Sharing one ramp for both leaves the camera off-axis for
+    // most of the dive, and off-axis the rifle's housing ring — which sits at a
+    // different depth than the glass — drifts sideways from the lens and opens
+    // a dark crescent of bore between the rim and the sight picture. Once camX/Y
+    // and lookX/Y/Z all sit on the eyepiece, the camera is on the axis at any
+    // dolly distance and the two stay concentric.
     if (eye && p >= SPIN_END) {
+      const tAlign = smooth(norm(p, SPIN_END, ALIGN_END))
       const tIn = smooth(norm(p, SPIN_END, DOLLY_END))
-      s.camX += (lerp(0, eye.x, tIn) - s.camX) * k
-      s.camY += (lerp(1.2, eye.y, tIn) - s.camY) * k
+      s.camX += (lerp(0, eye.x, tAlign) - s.camX) * k
+      s.camY += (lerp(1.2, eye.y, tAlign) - s.camY) * k
       s.camZ += (lerp(18.5, eye.z + EYE_STANDOFF, tIn) - s.camZ) * k
-      s.lookX += (lerp(0, eye.x, tIn) - s.lookX) * k
-      s.lookY += (lerp(1.2, eye.y, tIn) - s.lookY) * k
-      s.lookZ += (lerp(0, eye.z, tIn) - s.lookZ) * k
+      s.lookX += (lerp(0, eye.x, tAlign) - s.lookX) * k
+      s.lookY += (lerp(1.2, eye.y, tAlign) - s.lookY) * k
+      s.lookZ += (lerp(0, eye.z, tAlign) - s.lookZ) * k
     } else {
       s.lookX += (0 - s.lookX) * k
       s.lookZ += (0 - s.lookZ) * k
@@ -305,13 +348,21 @@ function WeaponModel({ driver, scopeWrapRef, crosshairRef }) {
         sx += x
         sy += y
       }
-      let cx = sx / RING_SAMPLES
-      let cy = sy / RING_SAMPLES
+      // Radius: fit to the rim verts about their own projected centroid, then
+      // open out to the housing's opening.
+      const rimCx = sx / RING_SAMPLES
+      const rimCy = sy / RING_SAMPLES
       let radius = 0
       for (let i = 0; i < RING_SAMPLES; i++) {
-        radius += Math.hypot(_px[i * 2] - cx, _px[i * 2 + 1] - cy)
+        radius += Math.hypot(_px[i * 2] - rimCx, _px[i * 2 + 1] - rimCy)
       }
-      radius /= RING_SAMPLES
+      radius = (radius / RING_SAMPLES) * BORE_SCALE
+
+      // Centre on the housing's opening rather than the glass, so no crescent
+      // of scope body shows between the rim and the sight picture.
+      _v.copy(ring.bore).applyMatrix4(m).project(cam)
+      let cx = offX + (_v.x * 0.5 + 0.5) * canvasW
+      let cy = offY + (-_v.y * 0.5 + 0.5) * canvasH
 
       const fs = smooth(norm(p, DOLLY_END, FULLSCREEN_START))
       if (fs > 0) {

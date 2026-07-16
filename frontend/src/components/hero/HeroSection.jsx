@@ -130,20 +130,25 @@ export default function HeroSection({ onFaceit, onDemo, demoBusy, demoErr }) {
           // projected circle starts as a small speck over the real eyepiece
           // and grows with the camera, then blooms past the screen edges on
           // its own before the final copy lands.
-          // Sight picture fades up once the lens is close enough to read as a real scope.
+          // Sight picture fades up at timeline 0.45 ≈ driver 0.50 — while the
+          // rifle is still turning, before it comes round to face us. The clip
+          // circle is fitted to the real lens rim every frame, so even at this
+          // oblique angle the picture lands inside the glass and rides the
+          // rotation in; there's nothing special about the head-on pose.
           tl.fromTo(
             '.js-scopeview',
             { autoAlpha: 0 },
-            { autoAlpha: 1, duration: 0.06, ease: 'power1.out' },
-            0.54
+            { autoAlpha: 1, duration: 0.05, ease: 'power1.out' },
+            0.45
           )
 
-          // Focus pull - the picture sharpens from heavy blur as the disc grows.
+          // Focus pull - starts as a blurred smudge in the turning glass and
+          // resolves by the time the zoom has settled, just before the reticle.
           tl.fromTo(
             '.js-scopeshot',
             { filter: 'blur(30px) brightness(0.35) saturate(0.5)', scale: 1.3 },
             { filter: 'blur(0px) brightness(1) saturate(1.05)', scale: 1, duration: 0.22, ease: 'power2.out' },
-            0.54
+            0.45
           )
 
           // Black surround fades in after the sight picture has settled into the scope.
@@ -173,6 +178,8 @@ export default function HeroSection({ onFaceit, onDemo, demoBusy, demoErr }) {
           // Phase 3: Fullscreen
           // Lens vignette clears before the clip is released to fullscreen.
           tl.to('.js-lensvignette', { autoAlpha: 0, duration: 0.08 }, 0.78)
+          // Scrim for the end copy — only once the circle has gone fullscreen.
+          tl.fromTo('.js-scopegrad', { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.05 }, 0.86)
           // ── Phase 4: Fullscreen CS2 — text settles in once the circle has
           // bloomed past the screen edges (driver 1 ≈ timeline 0.90) ──
           tl.fromTo(
@@ -329,8 +336,12 @@ export default function HeroSection({ onFaceit, onDemo, demoBusy, demoErr }) {
         </div>
 
         <div className="absolute inset-0 flex flex-col items-center justify-end pb-[14vh]">
+          {/* Scrim for the end copy. NOT clipped to the scope circle, so it
+              must stay at 0 until the reveal is basically over — the sight
+              picture now fades up while the rifle is still spinning, and this
+              would otherwise darken the whole stage from that point on. */}
           <div
-            className="absolute inset-0"
+            className="js-scopegrad absolute inset-0 opacity-0"
             style={{
               background:
                 'linear-gradient(to bottom, transparent 30%, rgba(6,7,9,0.3) 55%, rgba(6,7,9,0.85) 100%)',
