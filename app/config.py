@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     min_deposit: Decimal = Decimal("5.00")
     min_withdrawal: Decimal = Decimal("10.00")
 
+    # Table formats: seats per side. 1 => 1v1, 2 => 2v2, 5 => 5v5. Nothing in
+    # the schema is per-format, so opening a new format is this list plus a
+    # label in the frontend's FORMATS map — no migration.
+    allowed_team_sizes: str = "1,2,5"
+
     @field_validator("blocked_regions", "geo_exempt_paths")
     @classmethod
     def _strip(cls, v: str) -> str:
@@ -101,6 +106,12 @@ class Settings(BaseSettings):
     @property
     def rake_fraction(self) -> Decimal:
         return self.rake_percent / Decimal("100")
+
+    @property
+    def allowed_team_sizes_list(self) -> list[int]:
+        return sorted(
+            {int(s.strip()) for s in self.allowed_team_sizes.split(",") if s.strip()}
+        )
 
 
 @lru_cache

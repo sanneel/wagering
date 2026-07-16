@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import client from '../api/client'
 import Logo from '../components/Logo'
-import PlayerCard from '../components/PlayerCard'
 import InlineError from '../components/InlineError'
+import { useAuth } from '../context/AuthContext'
 import { money } from '../lib/format'
 
 export default function MatchResult() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [match, setMatch] = useState(null)
   const [error, setError] = useState('')
 
@@ -34,48 +35,93 @@ export default function MatchResult() {
       </Shell>
     )
   }
-
   if (!match) {
     return (
       <Shell>
-        <p className="text-center text-sm text-muted">Loading result…</p>
+        <p className="text-center text-sm text-steel-500">Loading result…</p>
       </Shell>
     )
   }
 
+  const size = match.team_size ?? 1
   const wager = parseFloat(match.wager_amount) || 0
-  const pot = parseFloat(match.pot_amount) || wager * 2
+  const pot = parseFloat(match.pot_amount) || wager * size * 2
   const rake = parseFloat(match.rake_amount) || pot * 0.1
   const payout = pot - rake
+  const share = payout / size
 
-  // Map winner_id to player1/player2.
-  const p1Won = match.winner_id != null && match.winner_id === match.player1_id
-  const winner = p1Won ? match.player1 : match.player2
-  const loser = p1Won ? match.player2 : match.player1
+  // The winning side comes from winning_team; everything is framed around
+  // whether the viewer was on it.
+  const won = match.winning_team
+  const winners = match.seats.filter((s) => s.team === won)
+  const losers = match.seats.filter((s) => s.team !== won)
+  const mySeat = match.seats.find((s) => s.player.id === user?.id)
+  const iWon = mySeat && mySeat.team === won
 
   return (
     <Shell>
-      <div className="flex items-stretch gap-4">
-        <PlayerCard player={winner} border="win" payout={payout} />
-        <PlayerCard player={loser} border="loss" payout={wager} />
+      <div className="text-center">
+        <div className="font-display text-xs font-bold uppercase tracking-[0.3em] text-steel-500">
+          {size}v{size} settled
+        </div>
+        {mySeat ? (
+          <>
+            <h1
+              className={`mt-3 font-display text-6xl font-black uppercase italic leading-none ${
+                iWon ? 'text-accent' : 'text-steel-400'
+              }`}
+            >
+              {iWon ? 'You won' : 'You lost'}
+            </h1>
+            <div
+              className={`mt-3 font-display text-3xl font-bold ${
+                iWon ? 'text-white' : 'text-steel-500'
+              }`}
+            >
+              {iWon ? `+${money(share)}` : `−${money(wager)}`}
+            </div>
+          </>
+        ) : (
+          <h1 className="mt-3 font-display text-5xl font-black uppercase italic leading-none text-white">
+            Team {won} took it
+          </h1>
+        )}
       </div>
 
-      <p className="mt-6 text-center text-sm text-muted">
-        Platform fee: {money(rake)} (10%)
+      <div className="mt-10 grid gap-4 lg:grid-cols-2">
+        <Side
+          title={`Team ${won} — winners`}
+          seats={winners}
+          meId={user?.id}
+          tone="win"
+          amount={`+${money(share)}`}
+        />
+        <Side
+          title={`Team ${won === 'A' ? 'B' : 'A'}`}
+          seats={losers}
+          meId={user?.id}
+          tone="loss"
+          amount={`−${money(wager)}`}
+        />
+      </div>
+
+      <p className="mt-6 text-center text-xs text-steel-500">
+        Pot {money(pot)} · rake {money(rake)} (10%) · {money(payout)} paid out
+        {size > 1 ? ` — ${money(share)} each` : ''}
       </p>
 
       <div className="mt-8 flex items-center justify-center gap-3">
         <button
           type="button"
-          onClick={() => navigate('/dashboard')}
-          className="rounded-md bg-accent px-5 py-2.5 text-sm font-medium text-white hover:bg-accent-dark"
+          onClick={() => navigate('/tables')}
+          className="rounded-md bg-accent px-6 py-3 text-xs font-semibold uppercase tracking-wide text-white transition-colors hover:bg-accent-dark"
         >
-          Play Again
+          Back to tables
         </button>
         <button
           type="button"
           onClick={() => navigate('/wallet')}
-          className="rounded-md border border-line px-5 py-2.5 text-sm font-medium text-ink hover:border-ink"
+          className="rounded-md border border-line-dark px-6 py-3 text-xs font-semibold uppercase tracking-wide text-steel-100 transition-colors hover:border-accent hover:text-accent"
         >
           Withdraw
         </button>
@@ -84,15 +130,58 @@ export default function MatchResult() {
   )
 }
 
+function Side({ title, seats, meId, tone, amount }) {
+  const win = tone === 'win'
+  return (
+    <div
+      className={`rounded-xl border p-5 ${
+        win ? 'border-accent/40 bg-accent/[0.06]' : 'border-line-dark bg-graphite-900'
+      }`}
+    >
+      <div
+        className={`mb-4 text-[10px] font-medium uppercase tracking-[0.24em] ${
+          win ? 'text-accent' : 'text-steel-500'
+        }`}
+      >
+        {title}
+      </div>
+      <div className="space-y-2">
+        {seats.map((s) => (
+          <div
+            key={s.player.id}
+            className="flex items-center justify-between gap-3 rounded-lg border border-line-dark bg-graphite-800 px-3 py-2.5"
+          >
+            <span className="truncate text-sm text-steel-100">
+              {s.player.faceit_username}
+              {s.player.id === meId && (
+                <span className="ml-2 text-[10px] uppercase tracking-wide text-accent">
+                  you
+                </span>
+              )}
+            </span>
+            <span
+              className={`shrink-0 text-xs font-semibold ${
+                win ? 'text-accent' : 'text-steel-500'
+              }`}
+            >
+              {amount}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function Shell({ children }) {
   return (
-    <div className="min-h-screen">
-      <header className="border-b border-line">
-        <div className="mx-auto flex h-14 max-w-5xl items-center px-4">
-          <Logo to="/dashboard" />
+    <div className="min-h-screen bg-graphite-950 text-steel-100">
+      <header className="border-b border-line-dark">
+        <div className="mx-auto flex h-16 max-w-5xl items-center px-6">
+          <Logo to="/tables" light />
         </div>
       </header>
-      <main className="mx-auto max-w-3xl px-4 py-12">{children}</main>
+      <main className="mx-auto max-w-3xl px-6 py-12">{children}</main>
     </div>
   )
 }

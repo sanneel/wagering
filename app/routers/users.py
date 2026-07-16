@@ -1,10 +1,10 @@
 """Current-user profile and match history."""
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import Match, User
+from app.models import Match, MatchParticipant, User
 from app.schemas import MyMatchOut, UserOut
 from app.security import get_current_user
 from app.serializers import serialize_my_matches
@@ -24,16 +24,16 @@ async def my_matches(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> list[MyMatchOut]:
-    """The current user's match history, framed from their side (W/L, payout)."""
+    """The current user's match history, framed from their side (W/L, payout).
+
+    Membership is a seat, so this joins through participants rather than
+    checking a pair of player columns.
+    """
     matches = (
         await db.execute(
             select(Match)
-            .where(
-                or_(
-                    Match.player1_id == current_user.id,
-                    Match.player2_id == current_user.id,
-                )
-            )
+            .join(MatchParticipant, MatchParticipant.match_id == Match.id)
+            .where(MatchParticipant.user_id == current_user.id)
             .order_by(Match.created_at.desc(), Match.id.desc())
             .limit(limit)
             .offset(offset)

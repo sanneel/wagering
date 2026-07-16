@@ -1,17 +1,30 @@
-"""Match lifecycle: create -> accept (LOCKED) -> settle / cancel.
+"""Table lifecycle: open -> join (until full, then LOCKED) -> settle / cancel.
 
-All money movement happens inside a single DB transaction per operation so a
-match can never end up with one player escrowed and the other not, or a winner
-credited without the match marked FINISHED.
+A table is two sides of `team_size` seats. Every seat is one escrowed stake, so
+the same code runs 1v1, 2v2 and 5v5 — only the seat count changes.
+
+All money movement happens inside a single DB transaction per operation, and a
+seat is only ever written in the same transaction as its ESCROW debit. So a
+table can never hold a seat whose stake was not taken, or pay a winning side
+without being marked FINISHED.
 """
 import logging
+from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models import Match, MatchStatus, TransactionType, User
+from app.models import (
+    Match,
+    MatchParticipant,
+    MatchStatus,
+    Team,
+    TransactionType,
+    User,
+)
 from app.redis_client import link_faceit_match, set_match_state
 from app.services import faceit, ledger
 
@@ -22,28 +35,58 @@ class MatchError(Exception):
     pass
 
 
-async def create_match(
-    db: AsyncSession, *, challenger_id: int, wager: Decimal
-) -> Match:
-    """Create an open PENDING match and escrow the challenger's stake.
+async def _seats(db: AsyncSession, match_id: int) -> list[MatchParticipant]:
+    rows = (
+        await db.execute(
+            select(MatchParticipant)
+            .where(MatchParticipant.match_id == match_id)
+            .order_by(MatchParticipant.id)
+        )
+    ).scalars().all()
+    return list(rows)
 
-    No opponent is chosen up front — the match waits for any player to accept
-    (see accept_match), at which point their stake is escrowed too.
-    """
+
+def _seat_counts(seats: list[MatchParticipant]) -> dict[Team, int]:
+    counts = {Team.A: 0, Team.B: 0}
+    for s in seats:
+        counts[s.team] += 1
+    return counts
+
+
+async def _sync_state(db: AsyncSession, match: Match) -> None:
+    seats = await _seats(db, match.id)
+    counts = _seat_counts(seats)
+    await set_match_state(
+        match.id,
+        {
+            "status": match.status.value,
+            "team_size": str(match.team_size),
+            "seats_a": str(counts[Team.A]),
+            "seats_b": str(counts[Team.B]),
+        },
+    )
+
+
+async def open_table(
+    db: AsyncSession, *, creator_id: int, wager: Decimal, team_size: int
+) -> Match:
+    """Open a PENDING table and seat the creator on team A with their stake."""
+    if team_size not in settings.allowed_team_sizes_list:
+        raise MatchError(f"unsupported format: {team_size}v{team_size}")
+
     wager = ledger.quantize(wager)
     if wager < settings.min_wager or wager > settings.max_wager:
         raise MatchError(
             f"wager must be between {settings.min_wager} and {settings.max_wager}"
         )
 
-    # Lock challenger and escrow their stake.
-    challenger = await ledger.lock_user(db, challenger_id)
-    if challenger.balance < wager:
+    creator = await ledger.lock_user(db, creator_id)
+    if creator.balance < wager:
         raise ledger.InsufficientFunds("insufficient balance for wager")
 
     match = Match(
-        player1_id=challenger_id,
-        player2_id=None,
+        creator_id=creator_id,
+        team_size=team_size,
         wager_amount=wager,
         pot_amount=Decimal("0.00"),
         rake_amount=Decimal("0.00"),
@@ -52,9 +95,10 @@ async def create_match(
     db.add(match)
     await db.flush()  # assign match.id
 
+    db.add(MatchParticipant(match_id=match.id, user_id=creator_id, team=Team.A))
     await ledger.debit(
         db,
-        user=challenger,
+        user=creator,
         tx_type=TransactionType.ESCROW,
         amount=wager,
         match_id=match.id,
@@ -62,79 +106,87 @@ async def create_match(
 
     await db.commit()
     await db.refresh(match)
-    await set_match_state(
-        match.id, {"status": match.status.value, "escrowed": "p1"}
-    )
+    await _sync_state(db, match)
     return match
 
 
-async def accept_match(db: AsyncSession, *, match_id: int, opponent_id: int) -> Match:
-    """Opponent accepts: escrow their stake, lock the match, create FACEIT match."""
-    # Lock the match row to serialize accept/cancel.
+async def join_table(
+    db: AsyncSession, *, match_id: int, user_id: int, team: Team | None = None
+) -> Match:
+    """Take a seat: escrow the stake, and lock the table once every seat is filled.
+
+    `team` picks a side; omitted, the emptier side is chosen so a lone joiner
+    lands opposite the creator rather than next to them.
+    """
+    # Lock the table row to serialise concurrent joins against each other and
+    # against cancel — two players must not be able to claim the last seat.
     match = (
-        await db.execute(
-            select(Match).where(Match.id == match_id).with_for_update()
-        )
+        await db.execute(select(Match).where(Match.id == match_id).with_for_update())
     ).scalar_one_or_none()
     if match is None:
-        raise MatchError("match not found")
+        raise MatchError("table not found")
     if match.status != MatchStatus.PENDING:
-        raise MatchError(f"match is {match.status.value}, cannot accept")
-    if match.player2_id is not None:
-        raise MatchError("match already has an opponent")
-    if match.player1_id == opponent_id:
-        raise MatchError("cannot accept your own match")
+        raise MatchError(f"table is {match.status.value}, cannot join")
 
-    opponent = await ledger.lock_user(db, opponent_id)
+    seats = await _seats(db, match_id)
+    if any(s.user_id == user_id for s in seats):
+        raise MatchError("you are already at this table")
+
+    counts = _seat_counts(seats)
+    if team is None:
+        team = Team.B if counts[Team.B] <= counts[Team.A] else Team.A
+    if counts[team] >= match.team_size:
+        raise MatchError(f"team {team.value} is full")
+
+    joiner = await ledger.lock_user(db, user_id)
     wager = match.wager_amount
-    if opponent.balance < wager:
+    if joiner.balance < wager:
         raise ledger.InsufficientFunds("insufficient balance for wager")
 
+    db.add(MatchParticipant(match_id=match.id, user_id=user_id, team=team))
     await ledger.debit(
         db,
-        user=opponent,
+        user=joiner,
         tx_type=TransactionType.ESCROW,
         amount=wager,
         match_id=match.id,
     )
 
-    match.player2_id = opponent_id
-    pot = ledger.quantize(wager * 2)
-    rake = ledger.quantize(pot * settings.rake_fraction)
-    match.pot_amount = pot
-    match.rake_amount = rake
-    match.status = MatchStatus.LOCKED
+    counts[team] += 1
+    filled = counts[Team.A] == match.team_size and counts[Team.B] == match.team_size
+    if filled:
+        pot = ledger.quantize(wager * 2 * match.team_size)
+        match.pot_amount = pot
+        match.rake_amount = ledger.quantize(pot * settings.rake_fraction)
+        match.status = MatchStatus.LOCKED
 
-    # Both stakes are now escrowed and the match is LOCKED. Commit the money
-    # state first; a failure creating the FACEIT match must not un-escrow funds
-    # (the match can still be cancelled -> refunded).
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Lost the race on the unique (match_id, user_id) seat.
+        await db.rollback()
+        raise MatchError("you are already at this table")
     await db.refresh(match)
-    await set_match_state(
-        match.id, {"status": match.status.value, "escrowed": "both"}
-    )
+    await _sync_state(db, match)
 
-    # Create the private FACEIT match (external call, outside the money txn).
+    if not filled:
+        return match
+
+    # Every stake is escrowed and the table is LOCKED. That state is committed
+    # before the FACEIT call — a failure there must not un-escrow anyone (the
+    # table can still be cancelled, which refunds).
     if settings.demo_mode:
-        # Demo: no real FACEIT call — synthesize a match id.
         faceit_match_id = f"demo-{match.id}"
     else:
-        p1 = (
-            await db.execute(select(User).where(User.id == match.player1_id))
-        ).scalar_one()
-        p2 = (
-            await db.execute(select(User).where(User.id == match.player2_id))
-        ).scalar_one()
+        rosters = await _rosters(db, match.id)
         try:
             faceit_match_id = await faceit.create_private_match(
-                p1.faceit_id, p2.faceit_id, match_ref=f"wager-{match.id}"
+                rosters[Team.A], rosters[Team.B], match_ref=f"wager-{match.id}"
             )
         except faceit.FaceitError:
-            logger.exception("FACEIT match creation failed for match %s", match.id)
-            # Leave LOCKED; an operator/cron can cancel -> refund if never started.
-            raise MatchError(
-                "failed to create FACEIT match; wager remains escrowed"
-            )
+            logger.exception("FACEIT match creation failed for table %s", match.id)
+            # Stays LOCKED; an operator/cron can cancel -> refund if never started.
+            raise MatchError("failed to create FACEIT match; stakes remain escrowed")
 
     match.faceit_match_id = faceit_match_id
     await db.commit()
@@ -144,87 +196,152 @@ async def accept_match(db: AsyncSession, *, match_id: int, opponent_id: int) -> 
     return match
 
 
+async def _rosters(db: AsyncSession, match_id: int) -> dict[Team, list[str]]:
+    """FACEIT ids per side, for creating the private match."""
+    rows = (
+        await db.execute(
+            select(MatchParticipant.team, User.faceit_id)
+            .join(User, User.id == MatchParticipant.user_id)
+            .where(MatchParticipant.match_id == match_id)
+            .order_by(MatchParticipant.id)
+        )
+    ).all()
+    out: dict[Team, list[str]] = {Team.A: [], Team.B: []}
+    for team, faceit_id in rows:
+        out[team].append(faceit_id)
+    return out
+
+
+async def leave_table(db: AsyncSession, *, match_id: int, user_id: int) -> Match:
+    """Give up a seat on a still-filling table and take the stake back.
+
+    Only while PENDING — once locked, the way out is cancel (refunds everyone).
+    The creator leaving cancels the table outright rather than orphaning it.
+    """
+    match = (
+        await db.execute(select(Match).where(Match.id == match_id).with_for_update())
+    ).scalar_one_or_none()
+    if match is None:
+        raise MatchError("table not found")
+    if match.status != MatchStatus.PENDING:
+        raise MatchError(f"table is {match.status.value}, cannot leave")
+    if match.creator_id == user_id:
+        return await cancel_and_refund(db, match_id=match_id, _locked=match)
+
+    seat = (
+        await db.execute(
+            select(MatchParticipant).where(
+                MatchParticipant.match_id == match_id,
+                MatchParticipant.user_id == user_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if seat is None:
+        raise MatchError("you are not at this table")
+
+    user = await ledger.lock_user(db, user_id)
+    await ledger.credit(
+        db,
+        user=user,
+        tx_type=TransactionType.REFUND,
+        amount=match.wager_amount,
+        match_id=match.id,
+    )
+    await db.delete(seat)
+
+    await db.commit()
+    await db.refresh(match)
+    await _sync_state(db, match)
+    return match
+
+
 async def settle_finished(
     db: AsyncSession, *, match_id: int, winner_faceit_id: str
 ) -> Match:
-    """Credit the winner (pot - rake) and mark FINISHED. Idempotent-safe."""
-    from datetime import datetime, timezone
-
+    """Pay the reported winner's whole side (pot - rake, split). Idempotent-safe."""
     match = (
-        await db.execute(
-            select(Match).where(Match.id == match_id).with_for_update()
-        )
+        await db.execute(select(Match).where(Match.id == match_id).with_for_update())
     ).scalar_one_or_none()
     if match is None:
-        raise MatchError("match not found")
+        raise MatchError("table not found")
     if match.status == MatchStatus.FINISHED:
         return match  # already settled
     if match.status not in (MatchStatus.LOCKED, MatchStatus.LIVE):
-        raise MatchError(f"cannot settle match in {match.status.value}")
+        raise MatchError(f"cannot settle table in {match.status.value}")
 
-    # Map the reported FACEIT winner to one of our two players.
-    p1 = await ledger.lock_user(db, match.player1_id)
-    p2 = await ledger.lock_user(db, match.player2_id)
-    if winner_faceit_id == p1.faceit_id:
-        winner = p1
-    elif winner_faceit_id == p2.faceit_id:
-        winner = p2
-    else:
-        raise MatchError("reported winner is not a participant")
+    # FACEIT reports one winning player; their seat decides the winning side.
+    rows = (
+        await db.execute(
+            select(MatchParticipant.user_id, MatchParticipant.team, User.faceit_id)
+            .join(User, User.id == MatchParticipant.user_id)
+            .where(MatchParticipant.match_id == match_id)
+            .order_by(MatchParticipant.id)
+        )
+    ).all()
+    winning_team: Team | None = None
+    for _uid, team, faceit_id in rows:
+        if faceit_id == winner_faceit_id:
+            winning_team = team
+            break
+    if winning_team is None:
+        raise MatchError("reported winner is not at this table")
 
-    payout = ledger.quantize(match.pot_amount - match.rake_amount)
-    await ledger.credit(
-        db,
-        user=winner,
-        tx_type=TransactionType.WIN,
-        amount=payout,
-        match_id=match.id,
-    )
+    winner_ids = [uid for uid, team, _f in rows if team == winning_team]
+    payout_total = ledger.quantize(match.pot_amount - match.rake_amount)
+    # Split evenly; any sub-cent remainder goes to the first seat so the credits
+    # always sum to exactly payout_total.
+    each = ledger.quantize(payout_total / len(winner_ids))
+    remainder = payout_total - (each * len(winner_ids))
 
-    match.winner_id = winner.id
+    for i, uid in enumerate(winner_ids):
+        user = await ledger.lock_user(db, uid)
+        await ledger.credit(
+            db,
+            user=user,
+            tx_type=TransactionType.WIN,
+            amount=each + (remainder if i == 0 else Decimal("0.00")),
+            match_id=match.id,
+        )
+
+    match.winning_team = winning_team
     match.status = MatchStatus.FINISHED
     match.finished_at = datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(match)
     await set_match_state(
-        match.id, {"status": match.status.value, "winner_id": str(winner.id)}
+        match.id, {"status": match.status.value, "winning_team": winning_team.value}
     )
     return match
 
 
-async def cancel_and_refund(db: AsyncSession, *, match_id: int) -> Match:
-    """Refund both players' escrow and mark CANCELLED. Idempotent-safe."""
-    from datetime import datetime, timezone
+async def cancel_and_refund(
+    db: AsyncSession, *, match_id: int, _locked: Match | None = None
+) -> Match:
+    """Refund every seated stake and mark CANCELLED. Idempotent-safe.
 
-    match = (
-        await db.execute(
-            select(Match).where(Match.id == match_id).with_for_update()
-        )
-    ).scalar_one_or_none()
+    Refunds are driven off the seats, so a half-filled 5v5 returns exactly the
+    stakes that were actually taken.
+    """
+    match = _locked
     if match is None:
-        raise MatchError("match not found")
+        match = (
+            await db.execute(
+                select(Match).where(Match.id == match_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+    if match is None:
+        raise MatchError("table not found")
     if match.status in (MatchStatus.CANCELLED, MatchStatus.FINISHED):
-        return match  # nothing to refund / already terminal
+        return match  # terminal, nothing escrowed
 
-    wager = match.wager_amount
-
-    # Player 1 is always escrowed (at create). Player 2 only if LOCKED/LIVE.
-    p1 = await ledger.lock_user(db, match.player1_id)
-    await ledger.credit(
-        db,
-        user=p1,
-        tx_type=TransactionType.REFUND,
-        amount=wager,
-        match_id=match.id,
-    )
-    if match.status in (MatchStatus.LOCKED, MatchStatus.LIVE):
-        p2 = await ledger.lock_user(db, match.player2_id)
+    for seat in await _seats(db, match_id):
+        user = await ledger.lock_user(db, seat.user_id)
         await ledger.credit(
             db,
-            user=p2,
+            user=user,
             tx_type=TransactionType.REFUND,
-            amount=wager,
+            amount=match.wager_amount,
             match_id=match.id,
         )
 
@@ -239,15 +356,27 @@ async def cancel_and_refund(db: AsyncSession, *, match_id: int) -> Match:
 
 async def mark_live(db: AsyncSession, *, match_id: int) -> Match:
     match = (
-        await db.execute(
-            select(Match).where(Match.id == match_id).with_for_update()
-        )
+        await db.execute(select(Match).where(Match.id == match_id).with_for_update())
     ).scalar_one_or_none()
     if match is None:
-        raise MatchError("match not found")
+        raise MatchError("table not found")
     if match.status == MatchStatus.LOCKED:
         match.status = MatchStatus.LIVE
         await db.commit()
         await db.refresh(match)
         await set_match_state(match.id, {"status": match.status.value})
     return match
+
+
+async def is_participant(db: AsyncSession, *, match_id: int, user_id: int) -> bool:
+    n = (
+        await db.execute(
+            select(func.count())
+            .select_from(MatchParticipant)
+            .where(
+                MatchParticipant.match_id == match_id,
+                MatchParticipant.user_id == user_id,
+            )
+        )
+    ).scalar_one()
+    return bool(n)

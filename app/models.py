@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -28,11 +29,18 @@ BigIntPK = BigInteger().with_variant(Integer, "sqlite")
 
 
 class MatchStatus(str, enum.Enum):
-    PENDING = "PENDING"      # created, waiting for both stakes to be escrowed
-    LOCKED = "LOCKED"        # both stakes escrowed, FACEIT match created
+    PENDING = "PENDING"      # open table, still filling seats
+    LOCKED = "LOCKED"        # every seat taken and escrowed, FACEIT match created
     LIVE = "LIVE"            # match reported as started by FACEIT
-    FINISHED = "FINISHED"    # settled, winner paid
-    CANCELLED = "CANCELLED"  # aborted/cancelled, both refunded
+    FINISHED = "FINISHED"    # settled, winning team paid
+    CANCELLED = "CANCELLED"  # aborted/cancelled, everyone refunded
+
+
+class Team(str, enum.Enum):
+    """The two sides of a table. A is the creator's side."""
+
+    A = "A"
+    B = "B"
 
 
 class TransactionType(str, enum.Enum):
@@ -64,16 +72,23 @@ class User(Base):
 
 
 class Match(Base):
+    """A table: two sides of `team_size` seats each, every seat one escrowed stake.
+
+    Seats live in `match_participants` rather than fixed player columns, so the
+    same row serves 1v1, 2v2, 5v5 and anything else — `team_size` is just a
+    number, and the allowed values are config (`ALLOWED_TEAM_SIZES`), not schema.
+    """
+
     __tablename__ = "matches"
 
     id: Mapped[int] = mapped_column(BigIntPK, primary_key=True)
-    player1_id: Mapped[int] = mapped_column(
+    # Who opened the table. Always seated on team A.
+    creator_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.id"), index=True
     )
-    # Nullable: an open match waits for any opponent to accept.
-    player2_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("users.id"), index=True, nullable=True
-    )
+    # Seats per side: 1 => 1v1, 2 => 2v2, 5 => 5v5.
+    team_size: Mapped[int] = mapped_column(Integer, default=1, index=True)
+    # Stake per player, not the pot. Pot = wager * 2 * team_size.
     wager_amount: Mapped[Decimal] = mapped_column(Money)
     pot_amount: Mapped[Decimal] = mapped_column(Money, default=Decimal("0.00"))
     rake_amount: Mapped[Decimal] = mapped_column(Money, default=Decimal("0.00"))
@@ -85,8 +100,8 @@ class Match(Base):
     faceit_match_id: Mapped[str | None] = mapped_column(
         String(128), unique=True, index=True, nullable=True
     )
-    winner_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("users.id"), nullable=True
+    winning_team: Mapped[Team | None] = mapped_column(
+        SAEnum(Team, name="team"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -95,8 +110,39 @@ class Match(Base):
         DateTime(timezone=True), nullable=True
     )
 
-    player1: Mapped["User"] = relationship(foreign_keys=[player1_id], lazy="noload")
-    player2: Mapped["User"] = relationship(foreign_keys=[player2_id], lazy="noload")
+    participants: Mapped[list["MatchParticipant"]] = relationship(
+        back_populates="match", lazy="noload", cascade="all, delete-orphan"
+    )
+
+
+class MatchParticipant(Base):
+    """One seat: a user on a side of a table, with their stake escrowed.
+
+    A row here means the stake is already escrowed — seats are only written
+    inside the same transaction as the ESCROW debit, so a seat can never exist
+    without money behind it.
+    """
+
+    __tablename__ = "match_participants"
+    __table_args__ = (
+        # One seat per player per table.
+        UniqueConstraint("match_id", "user_id", name="uq_participant_match_user"),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True)
+    match_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("matches.id"), index=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id"), index=True
+    )
+    team: Mapped[Team] = mapped_column(SAEnum(Team, name="team"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    match: Mapped["Match"] = relationship(back_populates="participants", lazy="noload")
+    user: Mapped["User"] = relationship(lazy="noload")
 
 
 class Transaction(Base):
@@ -123,3 +169,5 @@ class Transaction(Base):
 
 
 Index("ix_transactions_user_created", Transaction.user_id, Transaction.created_at)
+# Browsing open tables: filter by status + format, newest first.
+Index("ix_matches_status_size", Match.status, Match.team_size, Match.created_at)

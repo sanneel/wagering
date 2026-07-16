@@ -7,12 +7,6 @@ import HeroSection from '../components/hero/HeroSection'
 import Logo from '../components/Logo'
 import { money, formatDate } from '../lib/format'
 
-function connectFaceit() {
-  // Kick off the FACEIT OAuth flow on the backend. The backend redirects to
-  // FACEIT, then back to our /auth/callback with a token in the query string.
-  window.location.href = `${API_BASE}/auth/faceit`
-}
-
 const STEPS = [
   {
     n: '01',
@@ -21,19 +15,29 @@ const STEPS = [
   },
   {
     n: '02',
-    title: 'Lock your stake',
-    body: 'Pick a wager. Both stakes go into escrow before the server starts.',
+    title: 'Take a seat',
+    body: '1v1, 2v2 or 5v5. Every seat is escrowed before the server starts.',
   },
   {
     n: '03',
-    title: 'Winner gets paid',
-    body: 'Play the 1v1. The pot, minus a 10% rake, lands in seconds.',
+    title: 'Winners get paid',
+    body: 'Play it out. The pot, minus a 10% rake, splits in seconds.',
   },
 ]
 
 export default function Landing() {
   const navigate = useNavigate()
   const { fetchMe } = useAuth()
+
+  // The CTA promises tables, so send signed-in players straight there and let
+  // everyone else sign in first — /auth/callback lands on /tables too.
+  function connectFaceit() {
+    if (localStorage.getItem('token')) {
+      navigate('/tables')
+      return
+    }
+    window.location.href = `${API_BASE}/auth/faceit`
+  }
   const [matches, setMatches] = useState([])
   const [loaded, setLoaded] = useState(false)
   const [demoBusy, setDemoBusy] = useState(false)
@@ -49,7 +53,7 @@ export default function Landing() {
       const { data } = await client.post('/auth/demo')
       localStorage.setItem('token', data.access_token)
       await fetchMe()
-      navigate('/dashboard')
+      navigate('/tables')
     } catch {
       setDemoErr('Demo is unavailable right now.')
       setDemoBusy(false)
@@ -189,10 +193,10 @@ export default function Landing() {
 }
 
 const FAKE_ROWS = [
-  { p1: 'xX_headshoT_Xx', p2: 'clutch_king99', wager: '$25.00', winner: 'xX_headshoT_Xx' },
-  { p1: 'dust2_demon', p2: 'awp_only_lol', wager: '$10.00', winner: 'awp_only_lol' },
-  { p1: 'entry_frag', p2: 'NiKo_wannabe', wager: '$50.00', winner: 'entry_frag' },
-  { p1: 'one_tap_god', p2: 'spray_n_pray', wager: '$5.00', winner: null },
+  { fmt: '1v1', p1: 'xX_headshoT_Xx', p2: 'clutch_king99', wager: '$25.00', winner: 'xX_headshoT_Xx' },
+  { fmt: '5v5', p1: 'Team A', p2: 'Team B', wager: '$10.00', winner: 'Team B' },
+  { fmt: '2v2', p1: 'entry_frag +1', p2: 'NiKo_wannabe +1', wager: '$50.00', winner: 'entry_frag +1' },
+  { fmt: '1v1', p1: 'one_tap_god', p2: 'spray_n_pray', wager: '$5.00', winner: null },
 ]
 
 function SkeletonRows({ blurred = false }) {
@@ -201,6 +205,7 @@ function SkeletonRows({ blurred = false }) {
       {FAKE_ROWS.map((r, i) => (
         <div key={i} className="flex items-center justify-between py-4 text-sm">
           <div className="flex items-center gap-2">
+            <span className="w-8 font-display text-xs font-bold text-steel-500">{r.fmt}</span>
             <span className={r.winner === r.p1 ? 'font-medium text-steel-100' : 'text-steel-400'}>{r.p1}</span>
             <span className="text-steel-500">vs</span>
             <span className={r.winner === r.p2 ? 'font-medium text-steel-100' : 'text-steel-400'}>{r.p2}</span>
@@ -231,27 +236,41 @@ function SkeletonRows({ blurred = false }) {
   )
 }
 
+// A side reads as a name in 1v1, and as "name +N" once there's a team behind it.
+function sideName(players, fallback) {
+  if (!players?.length) return fallback
+  const [first, ...rest] = players
+  const name = first.faceit_username || fallback
+  return rest.length ? `${name} +${rest.length}` : name
+}
+
 function RecentRow({ match }) {
-  const p1 = match.player1_username || match.player1?.faceit_username || 'Player 1'
-  const p2 = match.player2_username || match.player2?.faceit_username || 'Player 2'
-  const winner =
-    match.winner_username || match.winner?.faceit_username || null
+  const size = match.team_size ?? 1
+  const a = sideName(match.team_a, 'Team A')
+  const b = sideName(match.team_b, 'Team B')
+  const aWon = match.winning_team === 'A'
+  const bWon = match.winning_team === 'B'
 
   return (
     <div className="flex items-center justify-between py-4 text-sm">
       <div className="flex items-center gap-2">
-        <span className={winner && winner === p1 ? 'font-medium text-steel-100' : 'text-steel-400'}>
-          {p1}
+        <span className="w-8 font-display text-xs font-bold text-steel-500">
+          {size}v{size}
+        </span>
+        <span className={aWon ? 'font-medium text-steel-100' : 'text-steel-400'}>
+          {a}
         </span>
         <span className="text-steel-500">vs</span>
-        <span className={winner && winner === p2 ? 'font-medium text-steel-100' : 'text-steel-400'}>
-          {p2}
+        <span className={bWon ? 'font-medium text-steel-100' : 'text-steel-400'}>
+          {b}
         </span>
       </div>
       <div className="flex items-center gap-6">
         <span className="font-medium text-accent">{money(match.wager_amount)}</span>
         <span className="w-28 text-right text-steel-500">
-          {winner ? `${winner} won` : formatDate(match.created_at)}
+          {match.winner_username
+            ? `${match.winner_username} won`
+            : formatDate(match.created_at)}
         </span>
       </div>
     </div>

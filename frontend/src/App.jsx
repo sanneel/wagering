@@ -5,6 +5,7 @@ import GeoBlocked from './components/GeoBlocked'
 import Landing from './pages/Landing'
 import AuthCallback from './pages/AuthCallback'
 import Dashboard from './pages/Dashboard'
+import Tables from './pages/Tables'
 import MatchLobby from './pages/MatchLobby'
 import MatchResult from './pages/MatchResult'
 import Wallet from './pages/Wallet'
@@ -32,6 +33,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/tables"
+        element={
+          <ProtectedRoute>
+            <Tables />
           </ProtectedRoute>
         }
       />

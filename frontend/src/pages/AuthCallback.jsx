@@ -23,7 +23,9 @@ export default function AuthCallback() {
       return
     }
     localStorage.setItem('token', token)
-    fetchMe().finally(() => navigate('/dashboard', { replace: true }))
+    // Land on the tables — signing in is a means to an end, and the end is
+    // taking a seat. The CTA that started this promised exactly that.
+    fetchMe().finally(() => navigate('/tables', { replace: true }))
   }, [params, fetchMe, navigate])
 
   return (

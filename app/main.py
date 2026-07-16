@@ -10,6 +10,7 @@ from app.database import Base, engine
 from app.middleware.geofencing import GeofencingMiddleware
 from app.redis_client import redis_client
 from app.routers import auth, match, users, wallet, webhook
+from app.services import demo
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -32,6 +33,9 @@ async def lifespan(app: FastAPI):
             logger.warning("redis unavailable at startup; state caching degraded")
     else:
         logger.info("redis disabled (redis_enabled=false)")
+    # Demo mode has only one human, so without a few standing bot tables the
+    # lobby's browse list would always be empty.
+    await demo.seed_open_tables()
     yield
     await redis_client.aclose()
     await engine.dispose()
@@ -60,6 +64,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(match.router)
 app.include_router(match.public_router)
+app.include_router(match.tables_router)
 app.include_router(wallet.router)
 app.include_router(webhook.router)
 

@@ -60,19 +60,26 @@ async def get_player_cs2_elo(faceit_id: str) -> int:
 
 
 async def create_private_match(
-    player1_faceit_id: str, player2_faceit_id: str, match_ref: str
+    team_a: list[str], team_b: list[str], match_ref: str
 ) -> str:
-    """Create a private 1v1 CS2 match on FACEIT and return its faceit_match_id.
+    """Create a private CS2 match on FACEIT and return its faceit_match_id.
+
+    Takes a roster per side, so the same call covers 1v1, 2v2 and 5v5 — the
+    format is implied by the roster length.
 
     NOTE: The exact FACEIT matchmaking/hub payload depends on your organizer
-    integration. This encapsulates that call so callers stay agnostic.
+    integration. This encapsulates that call so callers stay agnostic. Verify
+    the field names against your organizer account before going live.
     """
+    size = len(team_a)
     headers = {"Authorization": f"Bearer {settings.faceit_api_key}"}
     payload = {
         "game": "cs2",
-        "type": "1v1",
+        "type": f"{size}v{size}",
         "reference": match_ref,
-        "players": [player1_faceit_id, player2_faceit_id],
+        "teams": {"faction1": team_a, "faction2": team_b},
+        # Kept for 1v1 compatibility with integrations that expect a flat list.
+        "players": [*team_a, *team_b],
     }
     url = f"{settings.faceit_api_base}/matches"
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
