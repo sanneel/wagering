@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models import MatchStatus, Team, TransactionType
+from app.models import MatchStatus, PartyLogKind, SplitMode, Team, TransactionType
 
 
 # ─── Auth ───────────────────────────────────────────────────────────────
@@ -135,6 +135,56 @@ class MyMatchOut(BaseModel):
     payout: Decimal | None = None
     created_at: datetime
     finished_at: datetime | None = None
+
+
+# ─── Party ──────────────────────────────────────────────────────────────
+class PartyJoinRequest(BaseModel):
+    invite_code: str = Field(..., min_length=4, max_length=16)
+
+
+class PartySplitRequest(BaseModel):
+    split_mode: SplitMode
+
+
+class PartyAmountRequest(BaseModel):
+    amount: Decimal = Field(..., gt=0)
+
+
+class PartyDistributeRequest(BaseModel):
+    user_id: int
+    amount: Decimal = Field(..., gt=0)
+
+
+class PartyMemberOut(BaseModel):
+    player: PlayerPublic
+    is_leader: bool
+    # This member's claim on the pool — what they put in plus their share of
+    # banked winnings. It is also the cap on what the leader may pay them.
+    entitlement: Decimal
+
+
+class PartyLogOut(BaseModel):
+    """One Team Balance movement — the hover log."""
+
+    username: str
+    kind: PartyLogKind
+    amount: Decimal
+    match_id: int | None = None
+    created_at: datetime
+
+
+class PartyOut(BaseModel):
+    id: int
+    leader_id: int
+    split_mode: SplitMode
+    invite_code: str
+    pool_balance: Decimal
+    max_size: int
+    members: list[PartyMemberOut] = []
+    logs: list[PartyLogOut] = []
+    # Formats this party fits into (team_size >= party size) — drives which
+    # toggles the UI enables.
+    allowed_team_sizes: list[int] = []
 
 
 # ─── Wallet ─────────────────────────────────────────────────────────────

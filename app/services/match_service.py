@@ -21,12 +21,17 @@ from app.models import (
     Match,
     MatchParticipant,
     MatchStatus,
+    Party,
+    PartyLog,
+    PartyLogKind,
+    PartyMember,
+    SplitMode,
     Team,
     TransactionType,
     User,
 )
 from app.redis_client import link_faceit_match, set_match_state
-from app.services import faceit, ledger
+from app.services import faceit, ledger, party_service
 
 logger = logging.getLogger("match")
 
@@ -67,10 +72,90 @@ async def _sync_state(db: AsyncSession, match: Match) -> None:
     )
 
 
+async def _party_for_queue(
+    db: AsyncSession, user_id: int
+) -> tuple[Party, list[PartyMember]] | None:
+    """The caller's party, locked, if they queue as one.
+
+    A party of 1 queues as a solo player from their personal balance — the pool
+    only comes into play once there's actually a team to fund. Only the leader
+    may queue the party: seats and pool money for the whole group move on this
+    call, and that authority is the leader's.
+    """
+    m = await party_service.membership(db, user_id)
+    if m is None:
+        return None
+    members = await party_service.members_of(db, m.party_id)
+    if len(members) < 2:
+        return None
+    party = (
+        await db.execute(
+            select(Party).where(Party.id == m.party_id).with_for_update()
+        )
+    ).scalar_one()
+    if party.leader_id != user_id:
+        raise MatchError("only the party leader can queue the party")
+    return party, members
+
+
+async def _seat_party(
+    db: AsyncSession,
+    match: Match,
+    party: Party,
+    members: list[PartyMember],
+    team: Team,
+) -> None:
+    """Seat the whole party on one side, funded from the pool.
+
+    The pool pays `wager × party_size`; each member's slice is drained from
+    their entitlement proportionally, so a sponsor's seat costs the sponsor and
+    a free-rider's seat costs them nothing. That per-member slice is written to
+    the seat as `contributed` — it is what the payout split and the rollover
+    burn will later be computed from, so asymmetric funding flows through the
+    whole lifecycle from this one allocation.
+    """
+    total = ledger.quantize(match.wager_amount * len(members))
+    if party.pool_balance < total:
+        raise MatchError(
+            f"team balance {party.pool_balance} cannot cover the {total} buy-in"
+        )
+    shares = party_service.allocate(
+        total, [(m.user_id, m.entitlement) for m in members]
+    )
+    for m in members:
+        share = shares[m.user_id]
+        m.entitlement = ledger.quantize(m.entitlement - share)
+        db.add(
+            MatchParticipant(
+                match_id=match.id,
+                user_id=m.user_id,
+                team=team,
+                contributed=share,
+                party_id=party.id,
+                party_split=party.split_mode,
+            )
+        )
+        db.add(
+            PartyLog(
+                party_id=party.id,
+                user_id=m.user_id,
+                kind=PartyLogKind.ESCROW,
+                amount=share,
+                match_id=match.id,
+            )
+        )
+    party.pool_balance = ledger.quantize(party.pool_balance - total)
+
+
 async def open_table(
     db: AsyncSession, *, creator_id: int, wager: Decimal, team_size: int
 ) -> Match:
-    """Open a PENDING table and seat the creator on team A with their stake."""
+    """Open a PENDING table; the creator (or their whole party) takes team A.
+
+    A party can only queue formats it fits into: team_size >= party size. So a
+    duo sees 2v2 and 5v5, a full five sees only 5v5 — the guarantee is that the
+    party is never split across sides or tables.
+    """
     if team_size not in settings.allowed_team_sizes_list:
         raise MatchError(f"unsupported format: {team_size}v{team_size}")
 
@@ -80,9 +165,20 @@ async def open_table(
             f"wager must be between {settings.min_wager} and {settings.max_wager}"
         )
 
-    creator = await ledger.lock_user(db, creator_id)
-    if creator.balance < wager:
-        raise ledger.InsufficientFunds("insufficient balance for wager")
+    try:
+        party_ctx = await _party_for_queue(db, creator_id)
+    except party_service.PartyError as exc:
+        raise MatchError(str(exc))
+    if party_ctx and team_size < len(party_ctx[1]):
+        raise MatchError(
+            f"a party of {len(party_ctx[1])} does not fit in {team_size}v{team_size}"
+        )
+
+    creator = None
+    if party_ctx is None:
+        creator = await ledger.lock_user(db, creator_id)
+        if creator.balance < wager:
+            raise ledger.InsufficientFunds("insufficient balance for wager")
 
     match = Match(
         creator_id=creator_id,
@@ -95,18 +191,22 @@ async def open_table(
     db.add(match)
     await db.flush()  # assign match.id
 
-    db.add(
-        MatchParticipant(
-            match_id=match.id, user_id=creator_id, team=Team.A, contributed=wager
+    if party_ctx is not None:
+        party, members = party_ctx
+        await _seat_party(db, match, party, members, Team.A)
+    else:
+        db.add(
+            MatchParticipant(
+                match_id=match.id, user_id=creator_id, team=Team.A, contributed=wager
+            )
         )
-    )
-    await ledger.debit(
-        db,
-        user=creator,
-        tx_type=TransactionType.ESCROW,
-        amount=wager,
-        match_id=match.id,
-    )
+        await ledger.debit(
+            db,
+            user=creator,
+            tx_type=TransactionType.ESCROW,
+            amount=wager,
+            match_id=match.id,
+        )
 
     await db.commit()
     await db.refresh(match)
@@ -133,34 +233,59 @@ async def join_table(
         raise MatchError(f"table is {match.status.value}, cannot join")
 
     seats = await _seats(db, match_id)
-    if any(s.user_id == user_id for s in seats):
+
+    try:
+        party_ctx = await _party_for_queue(db, user_id)
+    except party_service.PartyError as exc:
+        raise MatchError(str(exc))
+    group = [m.user_id for m in party_ctx[1]] if party_ctx else [user_id]
+
+    seated_ids = {s.user_id for s in seats}
+    if any(uid in seated_ids for uid in group):
         raise MatchError("you are already at this table")
 
     counts = _seat_counts(seats)
+    need = len(group)
     if team is None:
-        team = Team.B if counts[Team.B] <= counts[Team.A] else Team.A
-    if counts[team] >= match.team_size:
-        raise MatchError(f"team {team.value} is full")
-
-    joiner = await ledger.lock_user(db, user_id)
-    wager = match.wager_amount
-    if joiner.balance < wager:
-        raise ledger.InsufficientFunds("insufficient balance for wager")
-
-    db.add(
-        MatchParticipant(
-            match_id=match.id, user_id=user_id, team=team, contributed=wager
+        # The emptier side that actually fits the whole group; ties go to B so
+        # a joiner lands opposite the creator rather than next to them.
+        candidates = [
+            t
+            for t in (Team.B, Team.A)
+            if match.team_size - counts[t] >= need
+        ]
+        if not candidates:
+            raise MatchError(
+                f"no side has {need} open seats for your party"
+            )
+        team = min(candidates, key=lambda t: counts[t])
+    if match.team_size - counts[team] < need:
+        raise MatchError(
+            f"team {team.value} does not have {need} open seats"
         )
-    )
-    await ledger.debit(
-        db,
-        user=joiner,
-        tx_type=TransactionType.ESCROW,
-        amount=wager,
-        match_id=match.id,
-    )
 
-    counts[team] += 1
+    wager = match.wager_amount
+    if party_ctx is not None:
+        party, members = party_ctx
+        await _seat_party(db, match, party, members, team)
+    else:
+        joiner = await ledger.lock_user(db, user_id)
+        if joiner.balance < wager:
+            raise ledger.InsufficientFunds("insufficient balance for wager")
+        db.add(
+            MatchParticipant(
+                match_id=match.id, user_id=user_id, team=team, contributed=wager
+            )
+        )
+        await ledger.debit(
+            db,
+            user=joiner,
+            tx_type=TransactionType.ESCROW,
+            amount=wager,
+            match_id=match.id,
+        )
+
+    counts[team] += need
     filled = counts[Team.A] == match.team_size and counts[Team.B] == match.team_size
     if filled:
         pot = ledger.quantize(wager * 2 * match.team_size)
@@ -220,11 +345,65 @@ async def _rosters(db: AsyncSession, match_id: int) -> dict[Team, list[str]]:
     return out
 
 
+async def _refund_seat(
+    db: AsyncSession, match: Match, seat: MatchParticipant
+) -> None:
+    """Return a seat's funding to its source: the player, or the party pool.
+
+    If the party (or the member's place in it) is gone by the time the refund
+    lands, the money goes to the player personally — it must never strand in a
+    pool the funder can no longer reach.
+    """
+    amount = seat.contributed
+    if amount <= 0:
+        return
+    if seat.party_id is not None:
+        party = (
+            await db.execute(
+                select(Party)
+                .where(Party.id == seat.party_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if party is not None:
+            member = (
+                await db.execute(
+                    select(PartyMember).where(
+                        PartyMember.party_id == seat.party_id,
+                        PartyMember.user_id == seat.user_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if member is not None:
+                party.pool_balance = ledger.quantize(party.pool_balance + amount)
+                member.entitlement = ledger.quantize(member.entitlement + amount)
+                db.add(
+                    PartyLog(
+                        party_id=party.id,
+                        user_id=seat.user_id,
+                        kind=PartyLogKind.REFUND,
+                        amount=amount,
+                        match_id=match.id,
+                    )
+                )
+                return
+    user = await ledger.lock_user(db, seat.user_id)
+    await ledger.credit(
+        db,
+        user=user,
+        tx_type=TransactionType.REFUND,
+        amount=amount,
+        match_id=match.id,
+    )
+
+
 async def leave_table(db: AsyncSession, *, match_id: int, user_id: int) -> Match:
-    """Give up a seat on a still-filling table and take the stake back.
+    """Give up seats on a still-filling table and take the funding back.
 
     Only while PENDING — once locked, the way out is cancel (refunds everyone).
     The creator leaving cancels the table outright rather than orphaning it.
+    Party seats move together: the leader pulls the whole party out, and a
+    member can't abandon a seat someone else's pool money is holding.
     """
     match = (
         await db.execute(select(Match).where(Match.id == match_id).with_for_update())
@@ -247,15 +426,31 @@ async def leave_table(db: AsyncSession, *, match_id: int, user_id: int) -> Match
     if seat is None:
         raise MatchError("you are not at this table")
 
-    user = await ledger.lock_user(db, user_id)
-    await ledger.credit(
-        db,
-        user=user,
-        tx_type=TransactionType.REFUND,
-        amount=match.wager_amount,
-        match_id=match.id,
-    )
-    await db.delete(seat)
+    if seat.party_id is not None:
+        party = (
+            await db.execute(
+                select(Party).where(Party.id == seat.party_id)
+            )
+        ).scalar_one_or_none()
+        if party is not None and party.leader_id != user_id:
+            raise MatchError(
+                "party seats leave together — your leader can pull the party out"
+            )
+        # The leader takes every seat the party queued with them.
+        party_seats = (
+            await db.execute(
+                select(MatchParticipant).where(
+                    MatchParticipant.match_id == match_id,
+                    MatchParticipant.party_id == seat.party_id,
+                )
+            )
+        ).scalars().all()
+        for s in party_seats:
+            await _refund_seat(db, match, s)
+            await db.delete(s)
+    else:
+        await _refund_seat(db, match, seat)
+        await db.delete(seat)
 
     await db.commit()
     await db.refresh(match)
@@ -284,6 +479,8 @@ async def settle_finished(
                 MatchParticipant.user_id,
                 MatchParticipant.team,
                 MatchParticipant.contributed,
+                MatchParticipant.party_id,
+                MatchParticipant.party_split,
                 User.faceit_id,
             )
             .join(User, User.id == MatchParticipant.user_id)
@@ -292,38 +489,90 @@ async def settle_finished(
         )
     ).all()
     winning_team: Team | None = None
-    for _uid, team, _c, faceit_id in rows:
-        if faceit_id == winner_faceit_id:
-            winning_team = team
+    for r in rows:
+        if r.faceit_id == winner_faceit_id:
+            winning_team = r.team
             break
     if winning_team is None:
         raise MatchError("reported winner is not at this table")
 
-    winner_ids = [uid for uid, team, _c, _f in rows if team == winning_team]
+    winners = [r for r in rows if r.team == winning_team]
     payout_total = ledger.quantize(match.pot_amount - match.rake_amount)
-    # Split evenly; any sub-cent remainder goes to the first seat so the credits
-    # always sum to exactly payout_total.
-    each = ledger.quantize(payout_total / len(winner_ids))
-    remainder = payout_total - (each * len(winner_ids))
+    # Split by what each seat actually FUNDED, not per head. Solo seats all
+    # funded one stake so this stays an even split; a party's asymmetric
+    # funding pays out asymmetrically — put in 20% of your side's buy-in, take
+    # 20% of the pot. A sponsored free-rider funded nothing and receives
+    # nothing here (the leader can gift them from the pool afterwards, capped).
+    shares = party_service.allocate(
+        payout_total, [(r.user_id, r.contributed) for r in winners]
+    )
 
-    for i, uid in enumerate(winner_ids):
-        user = await ledger.lock_user(db, uid)
-        await ledger.credit(
-            db,
-            user=user,
-            tx_type=TransactionType.WIN,
-            amount=each + (remainder if i == 0 else Decimal("0.00")),
-            match_id=match.id,
-        )
+    # LEADER-mode party seats bank their winnings in the party pool instead of
+    # being paid out; each member's entitlement rises by their proportional
+    # share, which caps what the leader may later pay whom. The split mode was
+    # snapshotted onto the seat at escrow, so flipping the toggle after the
+    # result changes nothing about this match.
+    parties: dict[int, Party] = {}
+    for r in winners:
+        share = shares[r.user_id]
+        banked = False
+        if r.party_split == SplitMode.LEADER and r.party_id is not None:
+            if r.party_id not in parties:
+                parties[r.party_id] = (
+                    await db.execute(
+                        select(Party)
+                        .where(Party.id == r.party_id)
+                        .with_for_update()
+                    )
+                ).scalar_one_or_none()
+            party = parties[r.party_id]
+            if party is not None:
+                member = (
+                    await db.execute(
+                        select(PartyMember).where(
+                            PartyMember.party_id == r.party_id,
+                            PartyMember.user_id == r.user_id,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if member is not None:
+                    party.pool_balance = ledger.quantize(
+                        party.pool_balance + share
+                    )
+                    member.entitlement = ledger.quantize(
+                        member.entitlement + share
+                    )
+                    db.add(
+                        PartyLog(
+                            party_id=party.id,
+                            user_id=r.user_id,
+                            kind=PartyLogKind.WIN,
+                            amount=share,
+                            match_id=match.id,
+                        )
+                    )
+                    banked = True
+        # Personal payout — solo seats, proportional-mode parties, and the
+        # fallback for anyone whose party dissolved mid-match: their share is
+        # theirs, it must not strand in a pool they can no longer reach.
+        if not banked and share > 0:
+            user = await ledger.lock_user(db, r.user_id)
+            await ledger.credit(
+                db,
+                user=user,
+                tx_type=TransactionType.WIN,
+                amount=share,
+                match_id=match.id,
+            )
 
     # The match is played, so every stake at it counts toward its owner's
     # wagering requirement — losers included; they wagered too. This is the only
     # place rollover burns: crediting it at escrow would let a player open a
     # table, cancel for a refund, and clear the requirement having played
     # nothing.
-    for uid, _team, contributed, _f in rows:
-        user = await ledger.lock_user(db, uid)
-        ledger.burn_rollover(user, contributed)
+    for r in rows:
+        user = await ledger.lock_user(db, r.user_id)
+        ledger.burn_rollover(user, r.contributed)
 
     match.winning_team = winning_team
     match.status = MatchStatus.FINISHED
@@ -357,15 +606,12 @@ async def cancel_and_refund(
     if match.status in (MatchStatus.CANCELLED, MatchStatus.FINISHED):
         return match  # terminal, nothing escrowed
 
+    # Refund what each seat actually FUNDED, back to where it came from: solo
+    # stakes to the player, pool-funded slices to the party pool (and the
+    # member's entitlement). A sponsor gets their whole sponsorship back; a
+    # free-rider funded nothing and is owed nothing.
     for seat in await _seats(db, match_id):
-        user = await ledger.lock_user(db, seat.user_id)
-        await ledger.credit(
-            db,
-            user=user,
-            tx_type=TransactionType.REFUND,
-            amount=match.wager_amount,
-            match_id=match.id,
-        )
+        await _refund_seat(db, match, seat)
 
     match.status = MatchStatus.CANCELLED
     match.finished_at = datetime.now(timezone.utc)

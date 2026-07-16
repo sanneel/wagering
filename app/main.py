@@ -9,7 +9,7 @@ from app.config import settings
 from app.database import Base, engine
 from app.middleware.geofencing import GeofencingMiddleware
 from app.redis_client import redis_client
-from app.routers import auth, match, users, wallet, webhook
+from app.routers import auth, match, party, users, wallet, webhook
 from app.services import demo
 
 logging.basicConfig(
@@ -64,6 +64,7 @@ app.include_router(users.router)
 app.include_router(match.router)
 app.include_router(match.public_router)
 app.include_router(match.tables_router)
+app.include_router(party.router)
 app.include_router(wallet.router)
 app.include_router(webhook.router)
 

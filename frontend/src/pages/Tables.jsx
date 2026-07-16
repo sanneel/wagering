@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import client from '../api/client'
 import Logo from '../components/Logo'
 import InlineError from '../components/InlineError'
+import PartyWidget from '../components/PartyWidget'
 import { useAuth } from '../context/AuthContext'
 import { money, errMsg } from '../lib/format'
 
@@ -22,6 +23,7 @@ const POLL_MS = 4000
 
 export default function Tables() {
   const navigate = useNavigate()
+  const [params, setParams] = useSearchParams()
   const { user, fetchMe } = useAuth()
 
   const [formats, setFormats] = useState([])
@@ -35,6 +37,35 @@ export default function Tables() {
   const [creating, setCreating] = useState(false)
   const [joiningId, setJoiningId] = useState(null)
   const [error, setError] = useState('')
+
+  // The caller's party, kept in sync by the widget. Everything below gates on
+  // its size: which formats can be queued, what a queue costs, who may queue.
+  const [party, setParty] = useState(null)
+  const partySize = party?.members?.length ?? 1
+  const isPartyLeader = !party || party.leader_id === user?.id
+
+  // Invite links land here as /tables?party=CODE — join, then clean the URL
+  // so a reload doesn't retry a spent invite.
+  useEffect(() => {
+    const code = params.get('party')
+    if (!code) return
+    client
+      .post('/party/join', { invite_code: code })
+      .catch(() => {})
+      .finally(() => {
+        params.delete('party')
+        setParams(params, { replace: true })
+      })
+  }, [params, setParams])
+
+  // A party must fit on one side, so shrinking formats drop out as it grows.
+  // Snap the picker to a legal format instead of leaving a dead selection.
+  useEffect(() => {
+    if (openSize < partySize) {
+      const legal = formats.find((f) => f.team_size >= partySize)
+      if (legal) setOpenSize(legal.team_size)
+    }
+  }, [partySize, openSize, formats])
 
   useEffect(() => {
     client
@@ -149,6 +180,9 @@ export default function Tables() {
           </div>
         </div>
 
+        {/* ── Party ── */}
+        <PartyWidget user={user} onParty={setParty} />
+
         {/* ── Open a table ── */}
         <section className="mt-10 overflow-hidden rounded-xl border border-line-dark bg-graphite-900">
           <div className="border-b border-line-dark px-6 py-4">
@@ -164,26 +198,39 @@ export default function Tables() {
                   {formats.map((f) => {
                     const copy = FORMAT_COPY[f.team_size] ?? {}
                     const on = openSize === f.team_size
+                    // A party can only queue formats it fits into — a duo
+                    // gets 2v2/5v5, a full five gets only 5v5.
+                    const locked = f.team_size < partySize
                     return (
                       <button
                         key={f.team_size}
                         type="button"
+                        disabled={locked}
                         onClick={() => setOpenSize(f.team_size)}
+                        title={
+                          locked
+                            ? `Your party of ${partySize} doesn't fit in ${f.label}`
+                            : undefined
+                        }
                         className={`group relative min-w-[9.5rem] rounded-lg border px-4 py-3 text-left transition-colors ${
-                          on
-                            ? 'border-accent bg-accent/10'
-                            : 'border-line-dark bg-graphite-800 hover:border-steel-500'
+                          locked
+                            ? 'cursor-not-allowed border-line-dark bg-graphite-900 opacity-40'
+                            : on
+                              ? 'border-accent bg-accent/10'
+                              : 'border-line-dark bg-graphite-800 hover:border-steel-500'
                         }`}
                       >
                         <div
                           className={`font-display text-2xl font-black italic leading-none ${
-                            on ? 'text-accent' : 'text-white'
+                            on && !locked ? 'text-accent' : 'text-white'
                           }`}
                         >
                           {f.label}
                         </div>
                         <div className="mt-1 text-[11px] leading-tight text-steel-400">
-                          {copy.blurb ?? `${f.team_size} per side`}
+                          {locked
+                            ? `Needs a party of ≤${f.team_size}`
+                            : copy.blurb ?? `${f.team_size} per side`}
                         </div>
                       </button>
                     )
@@ -245,6 +292,9 @@ export default function Tables() {
                 teamSize={openSize}
                 wager={wager}
                 balance={balance}
+                partySize={partySize}
+                poolBalance={parseFloat(party?.pool_balance ?? 0)}
+                isPartyLeader={isPartyLeader}
                 busy={creating}
                 onOpen={openTable}
               />
@@ -294,6 +344,8 @@ export default function Tables() {
                   key={t.id}
                   table={t}
                   meId={user?.id}
+                  partySize={partySize}
+                  canQueue={isPartyLeader}
                   busy={joiningId === t.id}
                   onJoin={() => joinTable(t.id)}
                   onWatch={() => navigate(`/match/${t.id}`)}
@@ -333,54 +385,85 @@ function Chip({ on, onClick, children }) {
   )
 }
 
-function Summary({ teamSize, wager, balance, busy, onOpen }) {
+function Summary({
+  teamSize,
+  wager,
+  balance,
+  partySize,
+  poolBalance,
+  isPartyLeader,
+  busy,
+  onOpen,
+}) {
   const valid = Number.isFinite(wager) && wager > 0
   const seats = teamSize * 2
   const pot = valid ? wager * seats : 0
-  const rake = pot * 0.1
-  const perWinner = valid ? (pot - rake) / teamSize : 0
-  const short = valid && wager > balance
+
+  // Solo queues fund one seat from the personal balance; a party funds
+  // party_size seats from the Team Balance, however unevenly it was filled.
+  const asParty = partySize >= 2
+  const buyIn = valid ? wager * (asParty ? partySize : 1) : 0
+  const short = valid && (asParty ? poolBalance < buyIn : wager > balance)
+  const notLeader = asParty && !isPartyLeader
 
   return (
     <>
       <div className="text-[10px] font-medium uppercase tracking-[0.24em] text-steel-500">
-        You put in
+        {asParty ? `Party buy-in (${partySize} seats)` : 'You put in'}
       </div>
       <div className="mt-1 font-display text-4xl font-black italic leading-none text-white">
-        {valid ? money(wager) : '—'}
+        {valid ? money(buyIn) : '—'}
       </div>
+      {asParty && (
+        <div className="mt-1 text-[10px] text-steel-500">
+          from the team balance ({money(poolBalance)} available)
+        </div>
+      )}
 
       <dl className="mt-5 space-y-2 border-t border-line-dark pt-4 text-xs">
         <Line k="Seats" v={`${seats} (${teamSize} a side)`} />
         <Line k="Full pot" v={valid ? money(pot) : '—'} />
-        <Line k="Rake (10%)" v={valid ? `−${money(rake)}` : '—'} />
+        <Line k="Rake" v="0% — winners take it all" />
       </dl>
 
       <div className="mt-4 rounded-md border border-accent/30 bg-accent/10 p-3">
         <div className="text-[10px] uppercase tracking-[0.2em] text-accent">
-          You win
+          Your side wins
         </div>
         <div className="mt-0.5 font-display text-2xl font-bold leading-none text-white">
-          {valid ? money(perWinner) : '—'}
+          {valid ? money(pot) : '—'}
         </div>
-        {teamSize > 1 && (
-          <div className="mt-1 text-[10px] text-steel-400">
-            each, split across your side
-          </div>
-        )}
+        <div className="mt-1 text-[10px] text-steel-400">
+          {asParty
+            ? 'split by who funded what'
+            : teamSize > 1
+              ? 'split across your side by stake'
+              : 'the whole pot'}
+        </div>
       </div>
 
       <button
         type="button"
         onClick={onOpen}
-        disabled={busy || !valid || short}
+        disabled={busy || !valid || short || notLeader}
         className="mt-5 w-full rounded-md bg-accent px-4 py-3 text-sm font-semibold uppercase tracking-wide text-white transition-colors hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-40"
       >
-        {busy ? 'Opening…' : short ? 'Not enough balance' : 'Open table'}
+        {busy
+          ? 'Opening…'
+          : notLeader
+            ? 'Leader queues the party'
+            : short
+              ? asParty
+                ? 'Team balance short'
+                : 'Not enough balance'
+              : asParty
+                ? `Queue party of ${partySize}`
+                : 'Open table'}
       </button>
       <p className="mt-2 text-center text-[10px] leading-relaxed text-steel-500">
-        Your stake is escrowed when the table opens. Leave before it fills and
-        you get it back.
+        {asParty
+          ? 'The buy-in leaves the team balance when the table opens; pulling out before it fills returns it.'
+          : 'Your stake is escrowed when the table opens. Leave before it fills and you get it back.'}
       </p>
     </>
   )
@@ -395,13 +478,17 @@ function Line({ k, v }) {
   )
 }
 
-function TableRow({ table, meId, busy, onJoin, onWatch }) {
+function TableRow({ table, meId, partySize, canQueue, busy, onJoin, onWatch }) {
   const size = table.team_size
   const label = `${size}v${size}`
   const a = table.seats.filter((s) => s.team === 'A')
   const b = table.seats.filter((s) => s.team === 'B')
   const mine = table.joined || table.creator_id === meId
   const full = table.open_seats === 0
+  // A party joins as a block on one side, so it needs that many free seats
+  // together — a duo can't take the last seat of a 5v5.
+  const fits =
+    Math.max(size - a.length, size - b.length) >= partySize && canQueue
 
   return (
     <div className="group flex flex-wrap items-center gap-x-6 gap-y-4 rounded-lg border border-line-dark bg-graphite-900 p-4 transition-colors hover:border-steel-500/60">
@@ -449,14 +536,21 @@ function TableRow({ table, meId, busy, onJoin, onWatch }) {
       <button
         type="button"
         onClick={mine ? onWatch : onJoin}
-        disabled={busy || (full && !mine)}
+        disabled={busy || (!mine && (full || !fits))}
+        title={
+          !mine && !fits && !full
+            ? canQueue
+              ? `No side has ${partySize} seats free for your party`
+              : 'Only your party leader can queue'
+            : undefined
+        }
         className={`w-28 shrink-0 rounded-md px-4 py-2.5 text-xs font-semibold uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
           mine
             ? 'border border-line-dark text-steel-100 hover:border-accent hover:text-accent'
             : 'bg-accent text-white hover:bg-accent-dark'
         }`}
       >
-        {busy ? '…' : mine ? 'Open' : 'Join'}
+        {busy ? '…' : mine ? 'Open' : !fits && !full ? 'No room' : 'Join'}
       </button>
     </div>
   )

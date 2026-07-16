@@ -47,6 +47,15 @@ app/
 | GET  | `/match/{id}` | Table/match status with the full seat list |
 | POST | `/webhook/faceit` | FACEIT match events → settle / refund |
 | POST | `/webhook/payed` | Payed.co payment events → credit deposits |
+| GET  | `/party` | The caller's party (members, Team Balance, activity log), or null |
+| POST | `/party` | Create a party (caller becomes leader) |
+| POST | `/party/join` | Join via `invite_code` |
+| POST | `/party/leave` | Leave with your pool share; the leader leaving disbands |
+| POST | `/party/kick/{user_id}` | Leader removes a member (their share goes with them) |
+| POST | `/party/split-mode` | Leader sets PROPORTIONAL / LEADER (snapshotted per match) |
+| POST | `/party/contribute` | Move personal balance into the Team Balance |
+| POST | `/party/reclaim` | Take your own share back out |
+| POST | `/party/distribute` | Leader pays a member from the pool (capped — see below) |
 | POST | `/wallet/deposit` | Initiate a Payed.co hosted checkout |
 | POST | `/wallet/withdraw` | Debit balance + request Payed.co payout (fee on profit only) |
 | GET  | `/wallet/quote` | Preview a withdrawal: own funds vs profit, fee, rollover gate |
@@ -63,6 +72,39 @@ Which formats are accepted is **config, not schema**: `ALLOWED_TEAM_SIZES`
 (default `1,2,5`). Adding 3v3 is that list plus a label in the frontend's
 `FORMAT_COPY` — no migration, no new endpoints. `GET /formats` publishes the
 list so the UI builds its pickers from the server rather than hardcoding them.
+
+## Parties and the Team Balance
+
+Every player can lead a **party** (up to the largest allowed format). A party
+queues as a block: it fits only formats with `team_size >= party size` — a duo
+sees 2v2/5v5, a full five sees only 5v5 — and its members are always seated
+together on one side. Only the leader queues; a member can't be committed to a
+stake by anyone but the person the party agreed to follow.
+
+Funding is **pooled and deliberately uneven**: members move money from their
+personal balance into the party's **Team Balance** (`/party/contribute`), and
+the pool pays the whole side's buy-in when the party queues. A sponsor can
+cover everyone. Each member holds an **entitlement** — their proportional claim
+on the pool — and every pool movement is logged (the hover log in the UI).
+
+Winnings follow the party's **split mode**, snapshotted onto each seat at
+escrow so flipping the toggle after seeing the result changes nothing:
+
+- **PROPORTIONAL** — each winner is paid straight to their personal balance by
+  their funded share of the side's buy-in. Fund 20%, take 20%.
+- **LEADER** — the side's winnings bank into the Team Balance, raising each
+  member's entitlement by their proportional share. The leader then pays
+  members out (`/party/distribute`) — but **capped**: up to a member's own
+  entitlement moves freely (it's theirs), anything above it comes out of the
+  leader's entitlement and **raises the recipient's rollover requirement** by
+  the gifted amount. A sponsored free-rider can be paid generously, but that
+  money cannot leave the platform without being wagered through — which is
+  what stops "Leader Decides" being a laundering rail between accounts.
+
+Refunds mirror funding: a cancelled table returns each seat's slice to the
+pool (or the player, for solo seats), and leaving/disbanding a party returns
+every member's entitlement to their personal balance — pool money can never
+strand or move to anyone but its proportional owner.
 
 ## Economics: zero rake, withdrawal fee, 1× rollover
 
