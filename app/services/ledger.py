@@ -108,3 +108,51 @@ async def debit(
         match_id=match_id,
         payment_ref=payment_ref,
     )
+
+
+# ─── Rollover / principal ───────────────────────────────────────────────
+# Both counters live beside the balance and only move through these helpers.
+# Callers must hold the user row (lock_user) first, same as any balance op.
+
+
+def raise_rollover(user: User, amount: Decimal) -> None:
+    """A deposit has to be wagered through before it can leave."""
+    user.rollover_requirement = quantize(
+        user.rollover_requirement + abs(quantize(amount))
+    )
+
+
+def burn_rollover(user: User, amount: Decimal) -> Decimal:
+    """Retire wagered-through money. Clamped at zero; returns what was burnt.
+
+    Only called when a match settles. Doing it at escrow would let a player open
+    a table, cancel it for a full refund, and clear the requirement having
+    wagered nothing.
+    """
+    amount = abs(quantize(amount))
+    burnt = min(user.rollover_requirement, amount)
+    user.rollover_requirement = quantize(user.rollover_requirement - burnt)
+    return burnt
+
+
+def add_principal(user: User, amount: Decimal) -> None:
+    """A deposit raises the fee-free allowance by what was put in."""
+    user.principal = quantize(user.principal + abs(quantize(amount)))
+
+
+def split_withdrawal(user: User, amount: Decimal) -> tuple[Decimal, Decimal]:
+    """Split a withdrawal into (own money back, profit) against the cost basis.
+
+    The first slice is the user's own deposited money and is never charged; only
+    what exceeds it is profit. Losing a match does not touch `principal`, so a
+    player who deposits 100, loses 50 and withdraws 50 pays nothing — that 50 is
+    still their own money coming home.
+    """
+    amount = quantize(amount)
+    own = min(user.principal, amount)
+    profit = quantize(amount - own)
+    return own, profit
+
+
+def consume_principal(user: User, own: Decimal) -> None:
+    user.principal = quantize(user.principal - abs(quantize(own)))

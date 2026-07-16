@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import client from '../api/client'
 import TopNav from '../components/TopNav'
 import InlineError from '../components/InlineError'
 import { useAuth } from '../context/AuthContext'
-import { money, formatDate } from '../lib/format'
+import { money, formatDate, errMsg } from '../lib/format'
 
 export default function Wallet() {
   const { user, fetchMe } = useAuth()
@@ -18,6 +18,31 @@ export default function Wallet() {
 
   const [txns, setTxns] = useState([])
   const [txnsLoaded, setTxnsLoaded] = useState(false)
+
+  // Live quote for the amount in the withdraw box, so the fee and the
+  // rollover gate are visible before the user commits.
+  const [quote, setQuote] = useState(null)
+  const quoteReq = useRef(0)
+
+  const rollover = parseFloat(user?.rollover_requirement ?? 0)
+
+  useEffect(() => {
+    const amount = parseFloat(withdrawAmt)
+    if (!amount || amount <= 0) {
+      setQuote(null)
+      return
+    }
+    const seq = ++quoteReq.current
+    const t = setTimeout(async () => {
+      try {
+        const { data } = await client.get('/wallet/quote', { params: { amount } })
+        if (seq === quoteReq.current) setQuote(data)
+      } catch {
+        if (seq === quoteReq.current) setQuote(null)
+      }
+    }, 300)
+    return () => clearTimeout(t)
+  }, [withdrawAmt])
 
   async function loadTxns() {
     try {
@@ -74,16 +99,17 @@ export default function Wallet() {
     }
     setWithdrawBusy(true)
     try {
-      await client.post('/wallet/withdraw', { amount })
-      setNotice('Withdrawal requested.')
+      const { data } = await client.post('/wallet/withdraw', { amount })
+      setNotice(
+        data?.fee > 0
+          ? `Withdrawal requested — ${money(data.amount)} after a ${money(data.fee)} fee.`
+          : 'Withdrawal requested.'
+      )
       setWithdrawAmt('')
+      setQuote(null)
       await Promise.all([fetchMe(), loadTxns()])
     } catch (err) {
-      setWithdrawErr(
-        err?.response?.data?.detail
-          ? String(err.response.data.detail)
-          : 'Withdrawal failed.'
-      )
+      setWithdrawErr(errMsg(err, 'Withdrawal failed.'))
     } finally {
       setWithdrawBusy(false)
     }
@@ -104,6 +130,24 @@ export default function Wallet() {
           </div>
           {notice && <p className="mt-3 text-sm text-win">{notice}</p>}
         </section>
+
+        {/* Rollover gate — deposits must be wagered through once before they
+            can be withdrawn. Only shown while something is still owed. */}
+        {rollover > 0 && (
+          <div className="mt-6 rounded-lg border border-accent/40 bg-accent/5 p-4 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-ink">
+                Wager {money(rollover)} more before you can withdraw
+              </span>
+              <span className="text-xs text-muted">1× play-through</span>
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-muted">
+              Deposited funds unlock for withdrawal once you&apos;ve put them
+              into a match. This burns down every time a match you&apos;re in
+              settles.
+            </p>
+          </div>
+        )}
 
         {/* Deposit / Withdraw */}
         <section className="mt-10 grid gap-6 sm:grid-cols-2">
@@ -148,16 +192,43 @@ export default function Wallet() {
                 className="w-full bg-transparent px-2 py-2 text-sm text-ink outline-none placeholder:text-muted"
               />
             </div>
+            {/* Fee breakdown for the amount entered. The fee only touches
+                profit — the part of a withdrawal above what you've deposited —
+                so getting your own money back always shows a $0 fee. */}
+            {quote && (
+              <dl className="mt-3 space-y-1 rounded-md bg-gray-50 p-3 text-xs">
+                <Row k="Your funds (no fee)" v={money(quote.own_funds)} />
+                <Row k="Profit" v={money(quote.profit)} />
+                <Row
+                  k={`Fee (${parseFloat(quote.fee_percent)}% of profit)`}
+                  v={`−${money(quote.fee)}`}
+                  muted
+                />
+                <div className="mt-1 flex items-center justify-between border-t border-line pt-1 text-sm font-medium text-ink">
+                  <dt>You receive</dt>
+                  <dd>{money(quote.you_receive)}</dd>
+                </div>
+              </dl>
+            )}
             <button
               type="button"
               onClick={withdraw}
-              disabled={withdrawBusy}
-              className="mt-3 w-full rounded-md border border-ink px-4 py-2 text-sm font-medium text-ink hover:bg-ink hover:text-white disabled:opacity-60"
+              disabled={withdrawBusy || (quote && !quote.can_withdraw)}
+              className="mt-3 w-full rounded-md border border-ink px-4 py-2 text-sm font-medium text-ink hover:bg-ink hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {withdrawBusy ? 'Processing…' : 'Withdraw'}
+              {withdrawBusy
+                ? 'Processing…'
+                : quote && !quote.can_withdraw
+                  ? 'Locked'
+                  : 'Withdraw'}
             </button>
             <div className="mt-2">
-              <InlineError message={withdrawErr} />
+              <InlineError
+                message={
+                  withdrawErr ||
+                  (quote && !quote.can_withdraw ? quote.reason : '')
+                }
+              />
             </div>
           </div>
         </section>
@@ -202,6 +273,15 @@ export default function Wallet() {
           </div>
         </section>
       </main>
+    </div>
+  )
+}
+
+function Row({ k, v, muted }) {
+  return (
+    <div className="flex items-center justify-between">
+      <dt className="text-muted">{k}</dt>
+      <dd className={muted ? 'text-muted' : 'text-ink'}>{v}</dd>
     </div>
   )
 }

@@ -175,6 +175,10 @@ async def payed_webhook(
     new_balance = ledger.quantize(user.balance + tx.amount)
     user.balance = new_balance
     tx.balance_after = new_balance  # finalize the pending row
+    # This is where a real deposit actually lands, so the fee-free allowance and
+    # the wagering requirement are raised here — not when checkout was started.
+    ledger.add_principal(user, tx.amount)
+    ledger.raise_rollover(user, tx.amount * settings.rollover_multiplier)
     await db.commit()
 
     logger.info("credited deposit %s to user %s", payment_ref, tx.user_id)

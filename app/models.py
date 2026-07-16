@@ -47,8 +47,9 @@ class TransactionType(str, enum.Enum):
     DEPOSIT = "DEPOSIT"
     WITHDRAWAL = "WITHDRAWAL"
     ESCROW = "ESCROW"        # wager locked out of balance into a match
-    WIN = "WIN"             # payout credited to the winner
+    WIN = "WIN"             # payout credited to the winning side
     REFUND = "REFUND"       # escrow returned on cancel
+    FEE = "FEE"             # house cut, taken on the profit part of a withdrawal
 
 
 class User(Base):
@@ -60,6 +61,17 @@ class User(Base):
     faceit_elo: Mapped[int] = mapped_column(default=0)
     avatar: Mapped[str | None] = mapped_column(String(512), nullable=True)
     balance: Mapped[Decimal] = mapped_column(Money, default=Decimal("0.00"))
+
+    # Cost basis: deposits made, less the deposited part already withdrawn. The
+    # fee-free allowance on withdrawal — anything above it is profit and is
+    # charged. Deliberately NOT reduced by losing a match: losing your deposit
+    # doesn't mean the next withdrawal is profit.
+    principal: Mapped[Decimal] = mapped_column(Money, default=Decimal("0.00"))
+
+    # Deposited money still to be wagered through before any withdrawal is
+    # allowed. Raised on deposit, burnt down when a match SETTLES.
+    rollover_requirement: Mapped[Decimal] = mapped_column(Money, default=Decimal("0.00"))
+
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -137,6 +149,14 @@ class MatchParticipant(Base):
         BigInteger, ForeignKey("users.id"), index=True
     )
     team: Mapped[Team] = mapped_column(SAEnum(Team, name="team"))
+
+    # What this player actually put into the pot. Equal to the table's stake
+    # today; once a party can fund asymmetrically (one player covering another's
+    # seat) it stops matching, which is why the amount is recorded per seat
+    # rather than inferred from the match. Drives both the payout split and how
+    # much rollover this player burns when the match settles.
+    contributed: Mapped[Decimal] = mapped_column(Money, default=Decimal("0.00"))
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

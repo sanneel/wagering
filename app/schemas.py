@@ -30,6 +30,11 @@ class UserOut(BaseModel):
     faceit_elo: int
     avatar: str | None = None
     balance: Decimal
+    # Deposited money still to be wagered through; withdrawals are blocked
+    # while it's above zero.
+    rollover_requirement: Decimal = Decimal("0.00")
+    # Fee-free allowance: deposits not yet taken back out.
+    principal: Decimal = Decimal("0.00")
     is_verified: bool
     is_demo: bool = False
     created_at: datetime
@@ -154,8 +159,23 @@ class WithdrawResponse(BaseModel):
     transaction_id: int
     payment_ref: str
     status: str
-    amount: Decimal
+    amount: Decimal  # what actually lands, net of the fee
+    fee: Decimal = Decimal("0.00")
     balance_after: Decimal
+
+
+class WithdrawQuote(BaseModel):
+    """What a withdrawal would cost, so the UI can show it before committing."""
+
+    amount: Decimal
+    own_funds: Decimal  # your own deposit coming back — never charged
+    profit: Decimal  # the part above your deposits
+    fee_percent: Decimal
+    fee: Decimal
+    you_receive: Decimal
+    rollover_remaining: Decimal
+    can_withdraw: bool
+    reason: str | None = None
 
 
 class TransactionOut(BaseModel):

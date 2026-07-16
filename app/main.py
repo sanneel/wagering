@@ -48,7 +48,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — tighten allow_origins to your frontend origin(s) in production.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://1v1wager.com"] if settings.environment == "production" else ["*"],

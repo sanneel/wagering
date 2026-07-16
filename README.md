@@ -48,7 +48,8 @@ app/
 | POST | `/webhook/faceit` | FACEIT match events → settle / refund |
 | POST | `/webhook/payed` | Payed.co payment events → credit deposits |
 | POST | `/wallet/deposit` | Initiate a Payed.co hosted checkout |
-| POST | `/wallet/withdraw` | Debit balance + request Payed.co payout |
+| POST | `/wallet/withdraw` | Debit balance + request Payed.co payout (fee on profit only) |
+| GET  | `/wallet/quote` | Preview a withdrawal: own funds vs profit, fee, rollover gate |
 | GET  | `/wallet/transactions` | Paginated ledger history |
 
 ## Tables and formats
@@ -62,6 +63,28 @@ Which formats are accepted is **config, not schema**: `ALLOWED_TEAM_SIZES`
 (default `1,2,5`). Adding 3v3 is that list plus a label in the frontend's
 `FORMAT_COPY` — no migration, no new endpoints. `GET /formats` publishes the
 list so the UI builds its pickers from the server rather than hardcoding them.
+
+## Economics: zero rake, withdrawal fee, 1× rollover
+
+Matches are **100% RTP** — the winning side takes the whole pot (`RAKE_PERCENT=0`;
+the rake columns and maths stay, so reintroducing one is config, not a migration).
+The house is paid on withdrawal instead:
+
+- **Fee on profit only** (`WITHDRAWAL_FEE_PERCENT`, default 20%). Each user carries
+  a `principal` — deposits made, less the deposited part already withdrawn. A
+  withdrawal's first slice is matched against `principal` and is **never charged**;
+  only the excess is profit and is taxed. Getting your own money back is free, so a
+  player who deposits 100, loses 50 and withdraws the rest pays nothing. `principal`
+  is **not** reduced by losing a match — losing your deposit doesn't make the next
+  withdrawal profit. `GET /wallet/quote` previews the split before the user commits.
+- **1× rollover** (`ROLLOVER_MULTIPLIER`). A deposit raises `rollover_requirement`;
+  withdrawals are blocked while it's above zero. It burns down **only when a match
+  settles**, by each participant's stake (losers included — they wagered too).
+  Crucially *not* at escrow: otherwise you could open a table, cancel it for a full
+  refund, and clear the requirement having played nothing. This is why there's no
+  "deposited vs won" split wallet — you simply can't withdraw un-played deposits.
+- The fee is its own `FEE` ledger row beside the `WITHDRAWAL`, so the ledger still
+  sums to the balance and the house cut is auditable.
 
 ## Money model
 

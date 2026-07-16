@@ -77,11 +77,29 @@ class Settings(BaseSettings):
     geo_exempt_paths: str = "/health,/webhook/faceit,/webhook/payed,/docs,/openapi.json"
 
     # Economics
-    rake_percent: Decimal = Decimal("10")
+    #
+    # Matches are 100% RTP: the winning side takes the whole pot. The house is
+    # paid on withdrawal instead (see withdrawal_fee_percent), so rake stays at
+    # 0 — the column and the maths remain, so reintroducing one is config, not
+    # a migration.
+    rake_percent: Decimal = Decimal("0")
     min_wager: Decimal = Decimal("1.00")
     max_wager: Decimal = Decimal("1000.00")
     min_deposit: Decimal = Decimal("5.00")
     min_withdrawal: Decimal = Decimal("10.00")
+
+    # Charged only on the part of a withdrawal that is ABOVE what the user has
+    # deposited and not yet taken back (User.principal). Getting your own money
+    # back is free; the house is paid on profit. Taxing gross withdrawals would
+    # tax returned principal — a player who deposits 100, wagers it, loses 50
+    # and withdraws the rest would pay a fee on their own money.
+    withdrawal_fee_percent: Decimal = Decimal("20")
+
+    # Deposits must be wagered through once before they can be withdrawn.
+    # Requirement burns down only when a match SETTLES — crediting it at escrow
+    # would let anyone open a table, cancel it for a refund, and clear the
+    # requirement without ever playing.
+    rollover_multiplier: Decimal = Decimal("1")
 
     # Table formats: seats per side. 1 => 1v1, 2 => 2v2, 5 => 5v5. Nothing in
     # the schema is per-format, so opening a new format is this list plus a
@@ -106,6 +124,10 @@ class Settings(BaseSettings):
     @property
     def rake_fraction(self) -> Decimal:
         return self.rake_percent / Decimal("100")
+
+    @property
+    def withdrawal_fee_fraction(self) -> Decimal:
+        return self.withdrawal_fee_percent / Decimal("100")
 
     @property
     def allowed_team_sizes_list(self) -> list[int]:

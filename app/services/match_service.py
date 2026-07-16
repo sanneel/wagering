@@ -95,7 +95,11 @@ async def open_table(
     db.add(match)
     await db.flush()  # assign match.id
 
-    db.add(MatchParticipant(match_id=match.id, user_id=creator_id, team=Team.A))
+    db.add(
+        MatchParticipant(
+            match_id=match.id, user_id=creator_id, team=Team.A, contributed=wager
+        )
+    )
     await ledger.debit(
         db,
         user=creator,
@@ -143,7 +147,11 @@ async def join_table(
     if joiner.balance < wager:
         raise ledger.InsufficientFunds("insufficient balance for wager")
 
-    db.add(MatchParticipant(match_id=match.id, user_id=user_id, team=team))
+    db.add(
+        MatchParticipant(
+            match_id=match.id, user_id=user_id, team=team, contributed=wager
+        )
+    )
     await ledger.debit(
         db,
         user=joiner,
@@ -272,21 +280,26 @@ async def settle_finished(
     # FACEIT reports one winning player; their seat decides the winning side.
     rows = (
         await db.execute(
-            select(MatchParticipant.user_id, MatchParticipant.team, User.faceit_id)
+            select(
+                MatchParticipant.user_id,
+                MatchParticipant.team,
+                MatchParticipant.contributed,
+                User.faceit_id,
+            )
             .join(User, User.id == MatchParticipant.user_id)
             .where(MatchParticipant.match_id == match_id)
             .order_by(MatchParticipant.id)
         )
     ).all()
     winning_team: Team | None = None
-    for _uid, team, faceit_id in rows:
+    for _uid, team, _c, faceit_id in rows:
         if faceit_id == winner_faceit_id:
             winning_team = team
             break
     if winning_team is None:
         raise MatchError("reported winner is not at this table")
 
-    winner_ids = [uid for uid, team, _f in rows if team == winning_team]
+    winner_ids = [uid for uid, team, _c, _f in rows if team == winning_team]
     payout_total = ledger.quantize(match.pot_amount - match.rake_amount)
     # Split evenly; any sub-cent remainder goes to the first seat so the credits
     # always sum to exactly payout_total.
@@ -302,6 +315,15 @@ async def settle_finished(
             amount=each + (remainder if i == 0 else Decimal("0.00")),
             match_id=match.id,
         )
+
+    # The match is played, so every stake at it counts toward its owner's
+    # wagering requirement — losers included; they wagered too. This is the only
+    # place rollover burns: crediting it at escrow would let a player open a
+    # table, cancel for a refund, and clear the requirement having played
+    # nothing.
+    for uid, _team, contributed, _f in rows:
+        user = await ledger.lock_user(db, uid)
+        ledger.burn_rollover(user, contributed)
 
     match.winning_team = winning_team
     match.status = MatchStatus.FINISHED
