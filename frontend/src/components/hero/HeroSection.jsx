@@ -156,14 +156,19 @@ export default function HeroSection({ onFaceit, onDemo, demoBusy, demoErr }) {
           // 3D rifle steps aside so the sight picture is unobstructed.
           tl.to('.js-weapon', { autoAlpha: 0, duration: 0.05 }, 0.67)
 
-          // Reticle follows the live projected circle and appears only after the zoom has settled.
+          // Reticle. WeaponCanvas sizes and centres it on the live projected
+          // circle every frame, so it always sits inside the glass; GSAP only
+          // fades it. It must be fully gone by timeline 0.80 — that is driver
+          // ≈0.89, right where the circle starts blooming past the screen
+          // edges — otherwise the hairlines ride the bloom out and end up
+          // stranded across the fullscreen shot.
           tl.fromTo(
             '.js-crosshair',
             { autoAlpha: 0 },
-            { autoAlpha: 1, duration: 0.06, ease: 'power2.out' },
-            0.72
+            { autoAlpha: 1, duration: 0.05, ease: 'power2.out' },
+            0.68
           )
-          tl.to('.js-crosshair', { autoAlpha: 0, duration: 0.06 }, 0.80)
+          tl.to('.js-crosshair', { autoAlpha: 0, duration: 0.03, ease: 'power2.in' }, 0.77)
 
           // Phase 3: Fullscreen
           // Lens vignette clears before the clip is released to fullscreen.
@@ -299,10 +304,15 @@ export default function HeroSection({ onFaceit, onDemo, demoBusy, demoErr }) {
           />
         </div>
 
+        {/* Reticle. Sized and centred on the live projected circle by
+            WeaponCanvas; `rounded-full overflow-hidden` then trims the
+            hairlines to exactly that circle, so they read as etched on the
+            glass and never spill onto the black surround. Starts at 0 so
+            nothing flashes before the first projected frame lands. */}
         <div
           ref={crosshairRef}
           className="js-crosshair absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-full opacity-0"
-          style={{ width: '55vmin', height: '55vmin' }}
+          style={{ width: 0, height: 0 }}
         >
           <div
             className="absolute left-0 top-1/2 w-full -translate-y-[0.5px]"

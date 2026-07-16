@@ -15,10 +15,10 @@ const EYE_STANDOFF = 1.35
 const DOLLY_END = 0.88
 const FULLSCREEN_START = 0.94
 
-// The scope mesh gives us the outside of the tube end. Use the inner glass
-// area for the sight picture so it sits inside the model instead of covering
-// the full orange ring.
-const LENS_FILL = 0.68
+// Points sampled around the eyepiece rim to fit the on-screen circle. The rim
+// is 608 verts; 48 reproduces the same centre/radius to 0.1px for a fraction
+// of the work.
+const RING_SAMPLES = 48
 
 const lerp = (a, b, t) => a + (b - a) * t
 const clamp01 = (t) => Math.min(1, Math.max(0, t))
@@ -32,13 +32,11 @@ const coverRadius = (cx, cy, w, h) =>
     Math.hypot(w - cx, h - cy)
   )
 
-// Reusable scratch objects so the projection allocates nothing per frame.
-const _endA = new THREE.Vector3()
-const _endB = new THREE.Vector3()
-const _scale = new THREE.Vector3()
-const _right = new THREE.Vector3()
-const _vC = new THREE.Vector3()
-const _vR = new THREE.Vector3()
+// Reusable scratch so the projection allocates nothing per frame.
+const _v = new THREE.Vector3()
+const _cA = new THREE.Vector3()
+const _cB = new THREE.Vector3()
+const _px = new Float64Array(RING_SAMPLES * 2)
 
 function WeaponModel({ driver, scopeWrapRef, crosshairRef }) {
   const { scene } = useGLTF('/awp.glb')
@@ -46,7 +44,7 @@ function WeaponModel({ driver, scopeWrapRef, crosshairRef }) {
   const float = useRef()
   const damped = useRef(null)
 
-  const { model, scale, center, lensMesh, lensLocal } = useMemo(() => {
+  const { model, scale, center, lensMesh, lensRings } = useMemo(() => {
     const box = new THREE.Box3().setFromObject(scene)
     const center = box.getCenter(new THREE.Vector3())
     const size = box.getSize(new THREE.Vector3())
@@ -60,65 +58,92 @@ function WeaponModel({ driver, scopeWrapRef, crosshairRef }) {
       if (!lensMesh && o.isMesh && /sphere/i.test(o.name)) lensMesh = o
     })
 
-    // That mesh is the whole scope TUBE, not a flat lens: measured local
-    // extents are ~4.9 long by ~0.85 square. So its bounding *sphere* would
-    // circumscribe the tube's LENGTH (radius ≈ half of 4.9) — wildly too big
-    // for the glass. Instead derive the real aperture from the local bbox:
-    // the long axis is the tube's barrel, the glass is the disc at either
-    // end-cap, and the aperture radius is half the cross-section. We cache
-    // both end-caps in LOCAL space and each frame pick whichever is nearer
-    // the camera — that's the eyepiece you're looking into.
-    let lensLocal = null
+    // That mesh is the scope tube, and — measured, not assumed — it is a
+    // truncated cone: two flat rims of 608 verts each, joined down a long
+    // axis. The rims are NOT the same size (local radius 1.0 at the objective,
+    // 0.733 at the eyepiece), so any single radius taken from the bounding box
+    // is wrong for at least one end, and a bounding sphere is wrong for both
+    // (it circumscribes the tube's length).
+    //
+    // So don't derive a radius at all — keep the rims themselves. Each frame
+    // we project the real rim verts and fit the circle to where they actually
+    // land, which is the rendered glass by construction: taper, perspective
+    // and off-axis view all fall out of it for free.
+    let lensRings = null
     if (lensMesh) {
       const g = lensMesh.geometry
       if (!g.boundingBox) g.computeBoundingBox()
       const bb = g.boundingBox
       const sz = bb.getSize(new THREE.Vector3())
-      const mid = bb.getCenter(new THREE.Vector3())
 
+      // Long axis = the barrel; the other two span each rim's plane.
       let long = 'x'
       if (sz.y > sz.x && sz.y > sz.z) long = 'y'
       else if (sz.z > sz.x && sz.z > sz.y) long = 'z'
-      const cross = ['x', 'y', 'z'].filter((a) => a !== long)
+      const [u, w] = ['x', 'y', 'z'].filter((a) => a !== long)
+      const mid = (bb.min[long] + bb.max[long]) / 2
 
-      const endA = mid.clone()
-      endA[long] = bb.min[long]
-      const endB = mid.clone()
-      endB[long] = bb.max[long]
-      // Half the mean cross-section = the aperture radius.
-      const radius = (sz[cross[0]] + sz[cross[1]]) / 4
+      const pos = g.attributes.position
+      const groups = [[], []]
+      for (let i = 0; i < pos.count; i++) {
+        const p = new THREE.Vector3().fromBufferAttribute(pos, i)
+        groups[p[long] < mid ? 0 : 1].push(p)
+      }
 
-      lensLocal = { endA, endB, radius }
+      if (groups[0].length >= RING_SAMPLES && groups[1].length >= RING_SAMPLES) {
+        const centroid = (ring) =>
+          ring
+            .reduce((acc, q) => acc.add(q), new THREE.Vector3())
+            .divideScalar(ring.length)
+        // Walk the rim by angle so the samples are spread around it evenly
+        // rather than clustering wherever the exporter happened to emit verts.
+        const evenly = (ring) => {
+          const sorted = [...ring].sort(
+            (a, b) => Math.atan2(a[w], a[u]) - Math.atan2(b[w], b[u])
+          )
+          const out = []
+          for (let i = 0; i < RING_SAMPLES; i++) {
+            out.push(sorted[Math.floor((i * sorted.length) / RING_SAMPLES)])
+          }
+          return out
+        }
+        lensRings = groups.map((ring) => ({
+          pts: evenly(ring),
+          center: centroid(ring),
+        }))
+      }
     }
 
-    return { model: scene, scale: 20 / Math.max(size.x, size.y, size.z), center, lensMesh, lensLocal }
+    return { model: scene, scale: 20 / Math.max(size.x, size.y, size.z), center, lensMesh, lensRings }
   }, [scene])
 
   // Dev-only: expose R3F's frame-advance so the render loop can be stepped
   // for verification when the tab is backgrounded and rAF is paused.
   const advance = useThree((s) => s.advance)
+  const camDbg = useThree((s) => s.camera)
   useEffect(() => {
     if (!import.meta.env.DEV) return
     window.__r3fAdvance = advance
-    window.__lensInfo = (camPos) => {
-      if (!lensMesh || !lensLocal) return { found: false }
+    window.__lensMesh = lensMesh
+    window.__scene = model
+    window.__lensInfo = () => {
+      if (!lensMesh || !lensRings) return { found: false }
       lensMesh.updateWorldMatrix(true, false)
       const m = lensMesh.matrixWorld
-      const a = lensLocal.endA.clone().applyMatrix4(m)
-      const b = lensLocal.endB.clone().applyMatrix4(m)
-      const s = new THREE.Vector3().setFromMatrixScale(m)
+      const a = lensRings[0].center.clone().applyMatrix4(m)
+      const b = lensRings[1].center.clone().applyMatrix4(m)
+      const near = a.distanceTo(camDbg.position) < b.distanceTo(camDbg.position) ? 0 : 1
       return {
         found: true,
         name: lensMesh.name,
-        localRadius: +lensLocal.radius.toFixed(3),
-        worldScale: +Math.max(s.x, s.y, s.z).toFixed(3),
-        worldRadius: +(lensLocal.radius * Math.max(s.x, s.y, s.z)).toFixed(3),
-        endA: a.toArray().map((v) => +v.toFixed(2)),
-        endB: b.toArray().map((v) => +v.toFixed(2)),
+        samples: RING_SAMPLES,
+        eyepieceRing: near,
+        eyepieceWorld: (near ? b : a).toArray().map((v) => +v.toFixed(2)),
+        camDist: +(near ? b : a).distanceTo(camDbg.position).toFixed(2),
         driver: +driver.current.progress.toFixed(3),
       }
     }
-  }, [advance, lensMesh, model])
+  }, [advance, camDbg, lensMesh, lensRings, model])
 
   useFrame((state, delta) => {
     const p = driver.current.progress
@@ -207,23 +232,21 @@ function WeaponModel({ driver, scopeWrapRef, crosshairRef }) {
       float.current.rotation.z = Math.sin(t * 0.7) * 0.02 * idle
     }
 
-    // ── Measure the REAL eyepiece from the scope mesh (pose is now applied) ──
-    // The tube's two end-caps in world space; the eyepiece is whichever is
-    // nearer the camera. This is measured from the geometry every frame, so
-    // the camera below dives at the ACTUAL glass rather than a guessed point.
+    // ── Locate the REAL eyepiece from the scope mesh (pose is now applied) ──
+    // Both rims in world space; the eyepiece is whichever is nearer the camera
+    // — that's the end you look into. Measured from the geometry every frame,
+    // so the camera below dives at the ACTUAL glass, not a guessed point.
     let eye = null
-    let eyeRadius = 0
-    if (lensMesh && lensLocal) {
+    let ring = null
+    if (lensMesh && lensRings) {
       lensMesh.updateWorldMatrix(true, false)
       const m = lensMesh.matrixWorld
-      _endA.copy(lensLocal.endA).applyMatrix4(m)
-      _endB.copy(lensLocal.endB).applyMatrix4(m)
-      eye =
-        _endA.distanceToSquared(cam.position) < _endB.distanceToSquared(cam.position)
-          ? _endA
-          : _endB
-      _scale.setFromMatrixScale(m)
-      eyeRadius = lensLocal.radius * Math.max(_scale.x, _scale.y, _scale.z) * LENS_FILL
+      _cA.copy(lensRings[0].center).applyMatrix4(m)
+      _cB.copy(lensRings[1].center).applyMatrix4(m)
+      const aNear =
+        _cA.distanceToSquared(cam.position) < _cB.distanceToSquared(cam.position)
+      eye = aNear ? _cA : _cB
+      ring = aNear ? lensRings[0] : lensRings[1]
     }
 
     // Retarget the scope dive onto the measured eyepiece. Without this the
@@ -248,20 +271,18 @@ function WeaponModel({ driver, scopeWrapRef, crosshairRef }) {
     cam.updateProjectionMatrix()
     cam.updateMatrixWorld()
 
-    // ── Project the REAL lens geometry and drive the CSS scope circle ──
-    // Take `Sphere002`'s cached local bounding sphere, transform it by the
-    // mesh's CURRENT world matrix (so pose rotation/scale/float are all
-    // baked in), and project it through the CURRENT camera. Both are the
-    // exact matrices this frame renders with, so the circle is glued to the
-    // rendered glass pixel-for-pixel through any FOV or damping.
+    // ── Project the REAL rim and drive the CSS scope circle ──
+    // Transform each cached rim vert by the mesh's CURRENT world matrix (pose
+    // rotation, scale and float all baked in) and project it through the
+    // CURRENT camera — the exact matrices this frame renders with. Fitting the
+    // circle to where those verts actually land means it cannot drift off the
+    // glass: no aperture guess, no fudge factor, no assumption that the tube
+    // is a cylinder or that we're looking straight down it.
     //
-    // Radius: offset the world centre along the camera's RIGHT vector by the
-    // sphere's world radius and project that too — the screen distance
-    // between the two IS the on-screen radius, correct for any orientation.
-    //
-    // Past DOLLY_END the circle lerps out to a guaranteed fullscreen so the
-    // reveal always lands even if the dolly stops short.
-    if (eye && scopeWrapRef?.current) {
+    // Past DOLLY_END the circle lerps out to a guaranteed fullscreen cover and
+    // settles to screen centre, so the reveal always lands square even if the
+    // dolly stops short of the glass.
+    if (ring && scopeWrapRef?.current) {
       const wrap = scopeWrapRef.current
       const wrapRect = wrap.getBoundingClientRect()
       const canvasRect = state.gl.domElement.getBoundingClientRect()
@@ -269,31 +290,37 @@ function WeaponModel({ driver, scopeWrapRef, crosshairRef }) {
       const h = wrapRect.height || state.size.height
       const canvasW = canvasRect.width || state.size.width
       const canvasH = canvasRect.height || state.size.height
+      const offX = canvasRect.left - wrapRect.left
+      const offY = canvasRect.top - wrapRect.top
 
-      // Offset along the camera's RIGHT vector so the measured radius is the
-      // on-screen one, correct for any lens orientation.
-      _right.setFromMatrixColumn(cam.matrixWorld, 0).normalize()
-      _vC.copy(eye)
-      _vR.copy(eye).addScaledVector(_right, eyeRadius)
-      _vC.project(cam)
-      _vR.project(cam)
-
-      const projectedCx = canvasRect.left + (_vC.x * 0.5 + 0.5) * canvasW - wrapRect.left
-      const projectedCy = canvasRect.top + (-_vC.y * 0.5 + 0.5) * canvasH - wrapRect.top
-      const projectedRx = canvasRect.left + (_vR.x * 0.5 + 0.5) * canvasW - wrapRect.left
-      const projectedRy = canvasRect.top + (-_vR.y * 0.5 + 0.5) * canvasH - wrapRect.top
-
-      const lock = smooth(norm(p, SPIN_END + 0.03, DOLLY_END))
-      const centerCx = canvasRect.left + canvasW / 2 - wrapRect.left
-      const centerCy = canvasRect.top + canvasH / 2 - wrapRect.top
-      const cx = lerp(projectedCx, centerCx, lock)
-      const cy = lerp(projectedCy, centerCy, lock)
-      let radius = Math.hypot(projectedRx - projectedCx, projectedRy - projectedCy)
-      radius *= lerp(0.72, 1, lock)
+      const m = lensMesh.matrixWorld
+      let sx = 0
+      let sy = 0
+      for (let i = 0; i < RING_SAMPLES; i++) {
+        _v.copy(ring.pts[i]).applyMatrix4(m).project(cam)
+        const x = offX + (_v.x * 0.5 + 0.5) * canvasW
+        const y = offY + (-_v.y * 0.5 + 0.5) * canvasH
+        _px[i * 2] = x
+        _px[i * 2 + 1] = y
+        sx += x
+        sy += y
+      }
+      let cx = sx / RING_SAMPLES
+      let cy = sy / RING_SAMPLES
+      let radius = 0
+      for (let i = 0; i < RING_SAMPLES; i++) {
+        radius += Math.hypot(_px[i * 2] - cx, _px[i * 2 + 1] - cy)
+      }
+      radius /= RING_SAMPLES
 
       const fs = smooth(norm(p, DOLLY_END, FULLSCREEN_START))
-      const full = coverRadius(cx, cy, w, h) + 8
-      radius = lerp(radius, full, fs)
+      if (fs > 0) {
+        const centerCx = offX + canvasW / 2
+        const centerCy = offY + canvasH / 2
+        cx = lerp(cx, centerCx, fs)
+        cy = lerp(cy, centerCy, fs)
+        radius = lerp(radius, coverRadius(centerCx, centerCy, w, h) + 8, fs)
+      }
 
       if (Number.isFinite(cx) && Number.isFinite(cy) && Number.isFinite(radius)) {
         if (p >= FULLSCREEN_START) {
@@ -305,13 +332,15 @@ function WeaponModel({ driver, scopeWrapRef, crosshairRef }) {
           wrap.style.webkitClipPath = clip
         }
 
+        // The reticle IS the circle — same centre, same diameter — so its own
+        // round clip keeps the hairlines inside the glass and off the black
+        // surround at every size. GSAP owns only its opacity.
         const crosshair = crosshairRef?.current
         if (crosshair) {
-          const reticleSize = Math.min(Math.max(radius * 2, 64), Math.min(w, h) * 0.62)
           crosshair.style.left = `${cx}px`
           crosshair.style.top = `${cy}px`
-          crosshair.style.width = `${reticleSize}px`
-          crosshair.style.height = `${reticleSize}px`
+          crosshair.style.width = `${radius * 2}px`
+          crosshair.style.height = `${radius * 2}px`
         }
       }
     }
