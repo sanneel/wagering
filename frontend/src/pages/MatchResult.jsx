@@ -106,7 +106,7 @@ export default function MatchResult() {
 
       <div className="mt-10 grid gap-4 lg:grid-cols-2">
         <Side
-          title={`Team ${won} — winners`}
+          title={`Team ${won} winners`}
           seats={winners}
           meId={user?.id}
           tone="win"

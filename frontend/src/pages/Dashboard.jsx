@@ -38,8 +38,7 @@ export default function Dashboard() {
         <section>
           <h1 className="text-xl font-semibold text-ink">Play</h1>
           <p className="mt-1 text-sm text-muted">
-            Open a table or take a seat at someone else&apos;s — 1v1, 2v2 or
-            5v5.
+            Open a table or take a seat. 1v1, 2v2 or 5v5.
           </p>
           <button
             type="button"
@@ -89,7 +88,7 @@ export default function Dashboard() {
 
 function MatchRow({ match }) {
   // 1v1 gives a name; team games give "N players" from the server.
-  const opponent = match.opponent_username || '—'
+  const opponent = match.opponent_username || '-'
   // `result` expected as 'W' | 'L' | null (pending). Fall back to status.
   const result = match.result ?? null
   const isWin = result === 'W' || result === 'win'
@@ -105,11 +104,11 @@ function MatchRow({ match }) {
         ) : isLoss ? (
           <span className="font-medium text-loss">L</span>
         ) : (
-          <span className="text-muted">{match.status || '—'}</span>
+          <span className="text-muted">{match.status || '-'}</span>
         )}
       </td>
       <td className="py-3 text-muted">
-        {match.payout != null ? money(match.payout) : '—'}
+        {match.payout != null ? money(match.payout) : '-'}
       </td>
       <td className="py-3 text-muted">{formatDate(match.created_at)}</td>
     </tr>

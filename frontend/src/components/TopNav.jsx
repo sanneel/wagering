@@ -31,7 +31,7 @@ export default function TopNav() {
         <Logo to="/dashboard" />
 
         <div className="text-sm font-medium text-ink">
-          {user ? money(user.balance) : '—'}
+          {user ? money(user.balance) : '-'}
         </div>
 
         <div className="flex items-center gap-3">

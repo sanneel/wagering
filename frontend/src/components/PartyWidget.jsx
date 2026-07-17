@@ -229,8 +229,7 @@ export default function PartyWidget({ user, onParty }) {
             {busy === 'fund' ? '…' : 'Add to team balance'}
           </button>
           <span className="text-[10px] text-steel-500">
-            Funding is uneven by design — a sponsor can cover the whole
-            buy-in. Payouts follow who funded what.
+            Uneven funding is fine. Payouts follow who funded what.
           </span>
           {error && <span className="text-xs text-loss">{error}</span>}
         </div>
@@ -279,8 +278,8 @@ export default function PartyWidget({ user, onParty }) {
             Cancel
           </button>
           <span className="text-[10px] text-steel-500">
-            Above their share, the rest comes from yours and must be wagered
-            before it can be withdrawn.
+            Above their share comes out of yours, and must be wagered before
+            it can be withdrawn.
           </span>
         </div>
       )}
@@ -442,7 +441,7 @@ function SplitToggle({ mode, canEdit, busy, onToggle }) {
       title={
         canEdit
           ? 'How winnings are divided'
-          : 'Only the leader can change this — but you can always see it'
+          : 'Only the leader can change this. You can always see it'
       }
       className={`flex items-center gap-2 rounded-full border px-3 py-1.5 transition-colors ${
         proportional

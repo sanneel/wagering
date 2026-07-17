@@ -149,7 +149,7 @@ export default function Tables() {
                 Balance
               </div>
               <div className="font-display text-lg font-semibold leading-none text-white">
-                {user ? money(user.balance) : '—'}
+                {user ? money(user.balance) : '-'}
               </div>
             </div>
             <button
@@ -174,8 +174,7 @@ export default function Tables() {
             </h1>
             <p className="mt-3 max-w-md text-sm leading-relaxed text-steel-400">
               Every seat is one escrowed stake. A table locks the moment the
-              last seat fills, and the winning side takes the whole pot — zero
-              rake.
+              last seat fills. Zero rake, winners take the whole pot.
             </p>
           </div>
         </div>
@@ -412,7 +411,7 @@ function Summary({
         {asParty ? `Party buy-in (${partySize} seats)` : 'You put in'}
       </div>
       <div className="mt-1 font-display text-4xl font-black italic leading-none text-white">
-        {valid ? money(buyIn) : '—'}
+        {valid ? money(buyIn) : '-'}
       </div>
       {asParty && (
         <div className="mt-1 text-[10px] text-steel-500">
@@ -422,8 +421,8 @@ function Summary({
 
       <dl className="mt-5 space-y-2 border-t border-line-dark pt-4 text-xs">
         <Line k="Seats" v={`${seats} (${teamSize} a side)`} />
-        <Line k="Full pot" v={valid ? money(pot) : '—'} />
-        <Line k="Rake" v="0% — winners take it all" />
+        <Line k="Full pot" v={valid ? money(pot) : '-'} />
+        <Line k="Rake" v="0%" />
       </dl>
 
       <div className="mt-4 rounded-md border border-accent/30 bg-accent/10 p-3">
@@ -431,7 +430,7 @@ function Summary({
           Your side wins
         </div>
         <div className="mt-0.5 font-display text-2xl font-bold leading-none text-white">
-          {valid ? money(pot) : '—'}
+          {valid ? money(pot) : '-'}
         </div>
         <div className="mt-1 text-[10px] text-steel-400">
           {asParty

@@ -102,7 +102,7 @@ export default function Wallet() {
       const { data } = await client.post('/wallet/withdraw', { amount })
       setNotice(
         data?.fee > 0
-          ? `Withdrawal requested — ${money(data.amount)} after a ${money(data.fee)} fee.`
+          ? `Withdrawal requested: ${money(data.amount)} after a ${money(data.fee)} fee.`
           : 'Withdrawal requested.'
       )
       setWithdrawAmt('')
@@ -126,7 +126,7 @@ export default function Wallet() {
             Balance
           </div>
           <div className="mt-2 text-5xl font-semibold text-ink">
-            {user ? money(user.balance) : '—'}
+            {user ? money(user.balance) : '-'}
           </div>
           {notice && <p className="mt-3 text-sm text-win">{notice}</p>}
         </section>

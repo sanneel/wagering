@@ -7,30 +7,12 @@ import HeroSection from '../components/hero/HeroSection'
 import Logo from '../components/Logo'
 import { money, formatDate } from '../lib/format'
 
-const STEPS = [
-  {
-    n: '01',
-    title: 'Connect FACEIT',
-    body: 'Sign in with your FACEIT account. No passwords stored.',
-  },
-  {
-    n: '02',
-    title: 'Take a seat',
-    body: '1v1, 2v2 or 5v5. Every seat is escrowed before the server starts.',
-  },
-  {
-    n: '03',
-    title: 'Winners get paid',
-    body: 'Play it out. Zero rake — the winning side takes the whole pot.',
-  },
-]
-
 export default function Landing() {
   const navigate = useNavigate()
   const { fetchMe } = useAuth()
 
   // The CTA promises tables, so send signed-in players straight there and let
-  // everyone else sign in first — /auth/callback lands on /tables too.
+  // everyone else sign in first; /auth/callback lands on /tables too.
   function connectFaceit() {
     if (localStorage.getItem('token')) {
       navigate('/tables')
@@ -43,7 +25,6 @@ export default function Landing() {
   const [demoBusy, setDemoBusy] = useState(false)
   const [demoErr, setDemoErr] = useState('')
 
-  const [stepsRef, stepsSeen] = useInView({ threshold: 0.15 })
   const [feedRef, feedSeen] = useInView({ threshold: 0.1 })
 
   async function tryDemo() {
@@ -110,53 +91,16 @@ export default function Landing() {
       />
 
       <main className="mx-auto max-w-6xl px-6">
-        {/* How a wager runs — on desktop these three steps play as cards
-            inside the hero scroll sequence, so the static grid is
-            mobile-only. The CTA stays on all breakpoints below. */}
-        <section
-          ref={stepsRef}
-          className={`border-t border-line-dark py-20 lg:hidden ${stepsSeen ? '' : 'opacity-0'}`}
-        >
-          <h2 className="text-xs font-medium uppercase tracking-[0.28em] text-steel-500">
-            How a wager runs
-          </h2>
-          <div className="mt-10 grid gap-px overflow-hidden rounded-lg border border-line-dark bg-line-dark sm:grid-cols-3">
-            {STEPS.map((s, idx) => (
-              <div
-                key={s.n}
-                className={`bg-graphite-800 p-8 ${stepsSeen ? ['slide-up-delayed-1', 'slide-up-delayed-2', 'slide-up-delayed-3'][idx] : 'opacity-0'}`}
-              >
-                <div className="font-display text-3xl font-semibold text-accent">
-                  {s.n}
-                </div>
-                <h3 className="mt-4 font-medium text-steel-100">{s.title}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-steel-400">
-                  {s.body}
-                </p>
-              </div>
-            ))}
-          </div>
-          {/* CTA after steps — conversion moment once the user understands the flow */}
-          <div className={`mt-10 flex justify-center ${stepsSeen ? 'slide-up-delayed-3' : 'opacity-0'}`}>
-            <button
-              type="button"
-              onClick={connectFaceit}
-              className="rounded-md bg-accent px-8 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent-dark"
-            >
-              Connect with FACEIT — it&apos;s free
-            </button>
-          </div>
-        </section>
-
-        {/* Desktop CTA — the step cards played inside the hero scroll, so
-            this is the landing spot right after the pin releases. */}
-        <section className="hidden border-t border-line-dark py-16 lg:flex lg:justify-center">
+        {/* The hero scroll sequence plays the three steps on every screen
+            size now, so this is just the landing spot after the pin releases:
+            one CTA, all breakpoints. */}
+        <section className="flex justify-center border-t border-line-dark py-16">
           <button
             type="button"
             onClick={connectFaceit}
             className="rounded-md bg-accent px-8 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent-dark"
           >
-            Connect with FACEIT — it&apos;s free
+            Connect with FACEIT. It&apos;s free
           </button>
         </section>
 
@@ -182,7 +126,7 @@ export default function Landing() {
       <footer className="border-t border-line-dark">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-6 py-8 text-xs text-steel-500">
           <span>
-            1v1wager — wager responsibly. Must be of legal age in your
+            1v1wager. Wager responsibly. Must be of legal age in your
             jurisdiction.
           </span>
           <span className="uppercase tracking-[0.24em]">EST. 2026</span>
@@ -203,16 +147,16 @@ function SkeletonRows({ blurred = false }) {
   return (
     <div className={blurred ? 'relative select-none' : undefined}>
       {FAKE_ROWS.map((r, i) => (
-        <div key={i} className="flex items-center justify-between py-4 text-sm">
-          <div className="flex items-center gap-2">
-            <span className="w-8 font-display text-xs font-bold text-steel-500">{r.fmt}</span>
-            <span className={r.winner === r.p1 ? 'font-medium text-steel-100' : 'text-steel-400'}>{r.p1}</span>
-            <span className="text-steel-500">vs</span>
-            <span className={r.winner === r.p2 ? 'font-medium text-steel-100' : 'text-steel-400'}>{r.p2}</span>
+        <div key={i} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 py-4 text-sm">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="w-8 shrink-0 font-display text-xs font-bold text-steel-500">{r.fmt}</span>
+            <span className={`truncate ${r.winner === r.p1 ? 'font-medium text-steel-100' : 'text-steel-400'}`}>{r.p1}</span>
+            <span className="shrink-0 text-steel-500">vs</span>
+            <span className={`truncate ${r.winner === r.p2 ? 'font-medium text-steel-100' : 'text-steel-400'}`}>{r.p2}</span>
           </div>
           <div className="flex items-center gap-6">
             <span className="font-medium text-accent">{r.wager}</span>
-            <span className="w-28 text-right text-steel-500">
+            <span className="text-right text-steel-500 sm:w-28">
               {r.winner ? `${r.winner} won` : 'in progress'}
             </span>
           </div>
@@ -229,7 +173,7 @@ function SkeletonRows({ blurred = false }) {
       )}
       {blurred && (
         <p className="pb-2 pt-1 text-center text-xs text-steel-500">
-          No matches yet — yours could be the first on this board.
+          No matches yet. Yours could be first on this board.
         </p>
       )}
     </div>
@@ -252,22 +196,22 @@ function RecentRow({ match }) {
   const bWon = match.winning_team === 'B'
 
   return (
-    <div className="flex items-center justify-between py-4 text-sm">
-      <div className="flex items-center gap-2">
-        <span className="w-8 font-display text-xs font-bold text-steel-500">
+    <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 py-4 text-sm">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="w-8 shrink-0 font-display text-xs font-bold text-steel-500">
           {size}v{size}
         </span>
-        <span className={aWon ? 'font-medium text-steel-100' : 'text-steel-400'}>
+        <span className={`truncate ${aWon ? 'font-medium text-steel-100' : 'text-steel-400'}`}>
           {a}
         </span>
-        <span className="text-steel-500">vs</span>
-        <span className={bWon ? 'font-medium text-steel-100' : 'text-steel-400'}>
+        <span className="shrink-0 text-steel-500">vs</span>
+        <span className={`truncate ${bWon ? 'font-medium text-steel-100' : 'text-steel-400'}`}>
           {b}
         </span>
       </div>
       <div className="flex items-center gap-6">
         <span className="font-medium text-accent">{money(match.wager_amount)}</span>
-        <span className="w-28 text-right text-steel-500">
+        <span className="text-right text-steel-500 sm:w-28">
           {match.winner_username
             ? `${match.winner_username} won`
             : formatDate(match.created_at)}

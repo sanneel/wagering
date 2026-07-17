@@ -3,8 +3,8 @@ import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import HeroCopy from './HeroCopy'
 
-// The WebGL canvas is heavy and desktop-only; load it lazily so mobile and
-// the initial paint aren't blocked by three.js.
+// The WebGL canvas is heavy; load it lazily so the initial paint isn't
+// blocked by three.js. It runs on every screen size, poster while loading.
 const WeaponCanvas = lazy(() => import('./WeaponCanvas'))
 
 gsap.registerPlugin(ScrollTrigger)
@@ -27,25 +27,20 @@ export default function HeroSection({ onFaceit, onDemo, demoBusy, demoErr }) {
     const ctx = gsap.context(() => {
       const mm = gsap.matchMedia()
 
+      // One experience for every screen size. The projection that glues the
+      // scope circle to the 3D lens is geometry-driven, so nothing about the
+      // sequence assumes a viewport — only reduced-motion opts out, and those
+      // users get the static hero with copy instead of a scroll ride.
       mm.add(
-        {
-          full: '(min-width: 1024px) and (prefers-reduced-motion: no-preference)',
-          compact: '(max-width: 1023px) and (prefers-reduced-motion: no-preference)',
-        },
-        (mmCtx) => {
-          const { full, compact } = mmCtx.conditions
-
-          if (full || compact) {
-            gsap.from('.js-copy > *', {
-              y: 24,
-              autoAlpha: 0,
-              duration: 0.8,
-              stagger: 0.07,
-              ease: 'power3.out',
-            })
-          }
-
-          if (!full) return 
+        { motion: '(prefers-reduced-motion: no-preference)' },
+        () => {
+          gsap.from('.js-copy > *', {
+            y: 24,
+            autoAlpha: 0,
+            duration: 0.8,
+            stagger: 0.07,
+            ease: 'power3.out',
+          })
 
           const tl = gsap.timeline({
             defaults: { ease: 'none' },
@@ -241,13 +236,10 @@ export default function HeroSection({ onFaceit, onDemo, demoBusy, demoErr }) {
         }}
       />
 
-      <div className="js-weapon pointer-events-none absolute inset-0 hidden lg:block">
+      <div className="js-weapon pointer-events-none absolute inset-0">
         <Suspense fallback={<WeaponPoster />}>
           <WeaponCanvas driver={driver} scopeWrapRef={scopeWrapRef} crosshairRef={crosshairRef} />
         </Suspense>
-      </div>
-      <div className="lg:hidden">
-        <WeaponPoster />
       </div>
 
       <div className="relative z-10 mx-auto flex h-full max-w-6xl items-center px-6">
@@ -271,19 +263,19 @@ export default function HeroSection({ onFaceit, onDemo, demoBusy, demoErr }) {
       <StepCard
         n="02"
         title="Lock your stake"
-        body="Both stakes into escrow before the server starts."
+        body="Every seat escrowed before the server starts."
         className="js-step2 right-[6%] top-[26%]"
       />
       <StepCard
         n="03"
         title="Winner takes it"
-        body="Play the 1v1. Lands in seconds."
+        body="Play it out. Winners take the whole pot."
         className="js-step3 bottom-[16%] left-[8%]"
       />
 
       {/* ── Scope view overlay ── */}
       <div
-        className="js-scopeview pointer-events-none absolute left-1/2 top-0 z-20 hidden -translate-x-1/2 opacity-0 lg:block"
+        className="js-scopeview pointer-events-none absolute left-1/2 top-0 z-20 -translate-x-1/2 opacity-0"
         style={{ width: '100vw', height: '100vh' }}
       >
         {/* Solid black surround — starts transparent so the small preview
@@ -357,14 +349,14 @@ export default function HeroSection({ onFaceit, onDemo, demoBusy, demoErr }) {
               <span className="text-accent">the pot.</span>
             </h2>
             <p className="js-scopebody mx-auto mt-4 max-w-xs text-sm leading-relaxed text-steel-300 opacity-0">
-              Every stake in escrow from lock to last kill. Zero rake — the
-              winning side takes the whole pot, in seconds.
+              Every stake in escrow from lock to last kill. Zero rake.
+              Winners take the whole pot in seconds.
             </p>
           </div>
         </div>
       </div>
 
-      <div className="js-progresstrack pointer-events-none absolute right-3 top-1/2 z-30 h-[38vh] w-[3px] -translate-y-1/2 overflow-hidden rounded-full bg-white/10 hidden lg:block">
+      <div className="js-progresstrack pointer-events-none absolute right-3 top-1/2 z-30 h-[38vh] w-[3px] -translate-y-1/2 overflow-hidden rounded-full bg-white/10">
         <div className="js-progressfill h-full w-full origin-top scale-y-0 rounded-full bg-accent" />
       </div>
 
@@ -386,13 +378,15 @@ function StepCard({ n, title, body, className }) {
   // GSAP owns the rotation; base tilt is written by the timeline end state.
   return (
     <div
-      className={`pointer-events-none absolute z-10 hidden w-[22rem] opacity-0 lg:block ${className}`}
+      className={`pointer-events-none absolute z-10 w-[min(22rem,74vw)] opacity-0 ${className}`}
     >
       {/* Big italic numeral with a paint drip. text-stroke gives it that
-          spray-can outline; the offset shadow is the classic tag shadow. */}
+          spray-can outline; the offset shadow is the classic tag shadow.
+          clamp() scales the tag from phone to desktop so the same animation
+          plays everywhere without the numeral swallowing a small screen. */}
       <div className="relative inline-block leading-none">
         <span
-          className="js-step-num relative block font-display text-[10.5rem] font-black italic leading-[0.85] text-accent"
+          className="js-step-num relative block font-display text-[clamp(5.5rem,18vw,10.5rem)] font-black italic leading-[0.85] text-accent"
           style={{
             textShadow:
               '5px 5px 0 rgba(0,0,0,0.85), 10px 10px 0 rgba(232,69,10,0.15)',
@@ -416,7 +410,7 @@ function StepCard({ n, title, body, className }) {
 
       {/* Scribbled underline — GSAP draws on the stroke as the tag appears */}
       <svg
-        className="mt-1 block w-56 overflow-visible"
+        className="mt-1 block w-40 overflow-visible sm:w-56"
         viewBox="0 0 240 20"
         fill="none"
         aria-hidden="true"
@@ -437,7 +431,7 @@ function StepCard({ n, title, body, className }) {
 
       {/* Stencil title — condensed italic, aggressive tracking */}
       <h3
-        className="mt-3 font-display text-[2.4rem] font-black italic uppercase leading-[0.95] text-white"
+        className="mt-3 font-display text-[clamp(1.6rem,5vw,2.4rem)] font-black italic uppercase leading-[0.95] text-white"
         style={{
           textShadow: '2px 2px 0 rgba(0,0,0,0.9)',
           letterSpacing: '-0.01em',
@@ -446,7 +440,7 @@ function StepCard({ n, title, body, className }) {
         {title}
       </h3>
       <p
-        className="mt-2 max-w-[18rem] text-sm leading-snug text-steel-300"
+        className="mt-2 max-w-[18rem] text-xs leading-snug text-steel-300 sm:text-sm"
         style={{ textShadow: '1px 1px 0 rgba(0,0,0,0.8)' }}
       >
         {body}

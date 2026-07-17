@@ -12,8 +12,8 @@ export default function HeroCopy({ onFaceit, onDemo, demoBusy, demoErr }) {
         on your aim.
       </h1>
       <p className="mt-6 max-w-md text-base leading-relaxed text-steel-400">
-        1v1 servers, FACEIT verified. Lock a stake, win the round, take the
-        pot. Payouts land in seconds.
+        1v1 to 5v5, FACEIT verified. Lock a stake, win, take the pot in
+        seconds.
       </p>
       <div className="mt-9 flex flex-wrap items-center gap-3">
         <button

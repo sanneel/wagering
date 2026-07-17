@@ -8,9 +8,9 @@ import { money, errMsg } from '../lib/format'
 
 const STATUS_TEXT = {
   PENDING: 'Waiting on seats',
-  LOCKED: 'Table locked — launch CS2 and connect',
+  LOCKED: 'Table locked. Launch CS2 and connect',
   LIVE: 'Match in progress',
-  CANCELLED: 'Table cancelled — stakes refunded',
+  CANCELLED: 'Table cancelled. Stakes refunded',
 }
 
 const POLL_MS = 3000
@@ -171,8 +171,8 @@ export default function MatchLobby() {
             {pending && (
               <p className="mt-4 text-center text-[11px] text-steel-500">
                 {isCreator
-                  ? 'Cancelling refunds every stake at the table.'
-                  : 'Leaving refunds your stake — you can do this until the table fills.'}
+                  ? 'Cancelling refunds every stake.'
+                  : 'Leaving refunds your stake.'}
               </p>
             )}
           </>
