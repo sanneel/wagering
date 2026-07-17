@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.models import Transaction, TransactionType, User
+from app.models import Transaction, TransactionType
 from app.redis_client import mark_webhook_seen, resolve_faceit_match
 from app.services import ledger, match_service, payed
 

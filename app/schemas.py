@@ -69,6 +69,12 @@ class SeatOut(BaseModel):
 
     team: Team
     player: PlayerPublic
+    # What this seat's player funded — payouts and refunds follow this, so the
+    # UI can show real per-player amounts instead of assuming an even split.
+    contributed: Decimal = Decimal("0.00")
+    # Set for party seats; LEADER means this seat's winnings bank to the party
+    # pool rather than paying out personally.
+    party_split: SplitMode | None = None
 
 
 class MatchOut(BaseModel):

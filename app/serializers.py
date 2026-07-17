@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Match, MatchParticipant, MatchStatus, Team, User
+from app.services import party_service
 from app.schemas import (
     MatchOut,
     MyMatchOut,
@@ -59,7 +60,12 @@ def _base(
     m: Match, seats: list[MatchParticipant], users: dict[int, User]
 ) -> dict:
     seat_out = [
-        SeatOut(team=s.team, player=_player(users, s.user_id))
+        SeatOut(
+            team=s.team,
+            player=_player(users, s.user_id),
+            contributed=s.contributed,
+            party_split=s.party_split,
+        )
         for s in seats
         if users.get(s.user_id)
     ]
@@ -177,13 +183,23 @@ async def serialize_my_matches(
 
         result: str | None = None
         payout: Decimal | None = None
-        if m.status == MatchStatus.FINISHED and m.winning_team is not None:
+        if m.status == MatchStatus.FINISHED and m.winning_team is not None and mine:
             if my_team == m.winning_team:
                 result = "W"
-                payout = (m.pot_amount - m.rake_amount) / m.team_size
+                # Same contribution-weighted split settle used — same weights,
+                # same seat order — so history shows the exact cents credited,
+                # not an even-split approximation that's wrong for parties.
+                winning = [s for s in seats if s.team == m.winning_team]
+                shares = party_service.allocate(
+                    m.pot_amount - m.rake_amount,
+                    [(s.user_id, s.contributed) for s in winning],
+                )
+                payout = shares[me_id]
             else:
                 result = "L"
-                payout = -m.wager_amount
+                # What THIS player funded — a sponsor lost more than one stake,
+                # a pool-sponsored free-rider lost nothing of their own.
+                payout = -mine.contributed
 
         out.append(
             MyMatchOut(

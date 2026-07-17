@@ -174,7 +174,7 @@ export default function Tables() {
             </h1>
             <p className="mt-3 max-w-md text-sm leading-relaxed text-steel-400">
               Every seat is one escrowed stake. A table locks the moment the
-              last seat fills, and the winning side splits the pot minus 10%
+              last seat fills, and the winning side takes the whole pot — zero
               rake.
             </p>
           </div>

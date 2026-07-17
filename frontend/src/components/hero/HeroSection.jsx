@@ -277,7 +277,7 @@ export default function HeroSection({ onFaceit, onDemo, demoBusy, demoErr }) {
       <StepCard
         n="03"
         title="Winner takes it"
-        body="Play the 1v1. The pot, minus 10% rake, lands in seconds."
+        body="Play the 1v1. Lands in seconds."
         className="js-step3 bottom-[16%] left-[8%]"
       />
 
@@ -357,8 +357,8 @@ export default function HeroSection({ onFaceit, onDemo, demoBusy, demoErr }) {
               <span className="text-accent">the pot.</span>
             </h2>
             <p className="js-scopebody mx-auto mt-4 max-w-xs text-sm leading-relaxed text-steel-300 opacity-0">
-              Both stakes in escrow from lock to last kill. 10% rake — the
-              rest pays out in seconds.
+              Every stake in escrow from lock to last kill. Zero rake — the
+              winning side takes the whole pot, in seconds.
             </p>
           </div>
         </div>

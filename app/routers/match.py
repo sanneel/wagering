@@ -4,12 +4,12 @@ A "table" is just a Match that is still PENDING (filling seats). Once every
 seat is taken it locks and becomes a match, which is why both live here.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.models import Match, MatchParticipant, MatchStatus, User
+from app.models import Match, MatchStatus, User
 from app.schemas import (
     FormatOut,
     MatchOut,

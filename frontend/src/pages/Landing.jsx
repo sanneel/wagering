@@ -21,7 +21,7 @@ const STEPS = [
   {
     n: '03',
     title: 'Winners get paid',
-    body: 'Play it out. The pot, minus a 10% rake, splits in seconds.',
+    body: 'Play it out. Zero rake — the winning side takes the whole pot.',
   },
 ]
 

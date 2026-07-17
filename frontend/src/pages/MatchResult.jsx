@@ -46,17 +46,26 @@ export default function MatchResult() {
   const size = match.team_size ?? 1
   const wager = parseFloat(match.wager_amount) || 0
   const pot = parseFloat(match.pot_amount) || wager * size * 2
-  const rake = parseFloat(match.rake_amount) || pot * 0.1
+  // No `||` fallback here: with zero rake, rake_amount is a legitimate "0.00"
+  // and a falsy-fallback would resurrect a phantom 10% cut on every result.
+  const rake = parseFloat(match.rake_amount ?? 0) || 0
   const payout = pot - rake
-  const share = payout / size
 
   // The winning side comes from winning_team; everything is framed around
-  // whether the viewer was on it.
+  // whether the viewer was on it. Payouts follow FUNDING, not headcount — a
+  // sponsor took a bigger share than a free-rider — so each seat's amount is
+  // its contributed fraction of the side's buy-in.
   const won = match.winning_team
   const winners = match.seats.filter((s) => s.team === won)
   const losers = match.seats.filter((s) => s.team !== won)
+  const sideTotal = winners.reduce((t, s) => t + (parseFloat(s.contributed) || 0), 0)
+  const shareOf = (s) =>
+    sideTotal > 0 ? (payout * (parseFloat(s.contributed) || 0)) / sideTotal : 0
   const mySeat = match.seats.find((s) => s.player.id === user?.id)
   const iWon = mySeat && mySeat.team === won
+  // LEADER-mode party seats banked their winnings to the Team Balance instead
+  // of a personal payout — say so rather than claiming money landed.
+  const banked = (s) => s.party_split === 'LEADER'
 
   return (
     <Shell>
@@ -78,8 +87,15 @@ export default function MatchResult() {
                 iWon ? 'text-white' : 'text-steel-500'
               }`}
             >
-              {iWon ? `+${money(share)}` : `−${money(wager)}`}
+              {iWon
+                ? `+${money(shareOf(mySeat))}`
+                : `−${money(parseFloat(mySeat.contributed) || 0)}`}
             </div>
+            {iWon && banked(mySeat) && (
+              <p className="mt-2 text-xs uppercase tracking-[0.2em] text-steel-500">
+                banked to your team balance
+              </p>
+            )}
           </>
         ) : (
           <h1 className="mt-3 font-display text-5xl font-black uppercase italic leading-none text-white">
@@ -94,20 +110,22 @@ export default function MatchResult() {
           seats={winners}
           meId={user?.id}
           tone="win"
-          amount={`+${money(share)}`}
+          amountFor={(s) => `+${money(shareOf(s))}${banked(s) ? ' ⇒ pool' : ''}`}
         />
         <Side
           title={`Team ${won === 'A' ? 'B' : 'A'}`}
           seats={losers}
           meId={user?.id}
           tone="loss"
-          amount={`−${money(wager)}`}
+          amountFor={(s) => `−${money(parseFloat(s.contributed) || 0)}`}
         />
       </div>
 
       <p className="mt-6 text-center text-xs text-steel-500">
-        Pot {money(pot)} · rake {money(rake)} (10%) · {money(payout)} paid out
-        {size > 1 ? ` — ${money(share)} each` : ''}
+        Pot {money(pot)}
+        {rake > 0 ? ` · rake ${money(rake)}` : ' · zero rake'} ·{' '}
+        {money(payout)} paid out
+        {size > 1 ? ', split by stake' : ''}
       </p>
 
       <div className="mt-8 flex items-center justify-center gap-3">
@@ -130,7 +148,7 @@ export default function MatchResult() {
   )
 }
 
-function Side({ title, seats, meId, tone, amount }) {
+function Side({ title, seats, meId, tone, amountFor }) {
   const win = tone === 'win'
   return (
     <div
@@ -164,7 +182,7 @@ function Side({ title, seats, meId, tone, amount }) {
                 win ? 'text-accent' : 'text-steel-500'
               }`}
             >
-              {amount}
+              {amountFor(s)}
             </span>
           </div>
         ))}
