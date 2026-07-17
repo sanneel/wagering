@@ -489,91 +489,100 @@ function TableRow({ table, meId, partySize, canQueue, busy, onJoin, onWatch }) {
   const fits =
     Math.max(size - a.length, size - b.length) >= partySize && canQueue
 
+  const btnLabel = busy ? '…' : mine ? 'Open' : !fits && !full ? 'No room' : 'Join'
+  const btnDisabled = busy || (!mine && (full || !fits))
+  const btnTitle =
+    !mine && !fits && !full
+      ? canQueue
+        ? `No side has ${partySize} seats free for your party`
+        : 'Only your party leader can queue'
+      : undefined
+  const btnClass = mine
+    ? 'border border-line-dark text-steel-100 hover:border-accent hover:text-accent'
+    : 'bg-accent text-white hover:bg-accent-dark'
+
   return (
-    <div className="group flex flex-wrap items-center gap-x-6 gap-y-4 rounded-lg border border-line-dark bg-graphite-900 p-4 transition-colors hover:border-steel-500/60">
-      {/* Format */}
-      <div className="w-16 shrink-0">
+    <div className="group rounded-lg border border-line-dark bg-graphite-900 p-4 transition-colors hover:border-steel-500/60">
+      {/* Header row: format, stake, pot, action. Same at every width — the
+          numbers are what a scroller-through-the-list needs first. */}
+      <div className="flex items-center gap-4">
         <div className="font-display text-2xl font-black italic leading-none text-accent">
           {label}
         </div>
+        <div className="min-w-0">
+          <div className="text-[10px] uppercase tracking-[0.18em] text-steel-500">
+            Stake · Pot
+          </div>
+          <div className="flex items-baseline gap-2 font-display leading-none">
+            <span className="text-base font-bold text-white sm:text-lg">
+              {money(table.wager_amount)}
+            </span>
+            <span className="text-xs text-steel-500">/</span>
+            <span className="text-base font-bold text-accent sm:text-lg">
+              {money(parseFloat(table.wager_amount) * size * 2)}
+            </span>
+          </div>
+        </div>
+        <div className="ml-auto flex items-center gap-3">
+          <span className="hidden text-xs text-steel-400 sm:inline">
+            {full
+              ? 'Filling…'
+              : `${table.open_seats}/${table.seats_total} open`}
+          </span>
+          <button
+            type="button"
+            onClick={mine ? onWatch : onJoin}
+            disabled={btnDisabled}
+            title={btnTitle}
+            className={`shrink-0 rounded-md px-4 py-2 text-xs font-semibold uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-40 sm:px-5 sm:py-2.5 ${btnClass}`}
+          >
+            {btnLabel}
+          </button>
+        </div>
       </div>
 
-      {/* Sides */}
-      <div className="flex min-w-[16rem] flex-1 items-center gap-3">
-        <Side seats={a} size={size} />
-        <span className="font-display text-xs font-bold uppercase text-steel-500">
+      {/* Rosters. Sides sit side-by-side on desktop, one-per-line on tablet
+          and phone — a 5v5 has ten pills, they cannot cohabit a phone row. */}
+      <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto_1fr] md:items-center md:gap-3">
+        <Side team="A" seats={a} size={size} />
+        <span className="hidden font-display text-[10px] font-bold uppercase text-steel-500 md:inline">
           vs
         </span>
-        <Side seats={b} size={size} />
+        <Side team="B" seats={b} size={size} />
       </div>
 
-      {/* Stake */}
-      <div className="shrink-0 text-right">
-        <div className="text-[10px] uppercase tracking-[0.2em] text-steel-500">
-          Stake
-        </div>
-        <div className="font-display text-lg font-bold leading-none text-white">
-          {money(table.wager_amount)}
-        </div>
+      {/* Seats-left footnote gets its own line on mobile so the header stays
+          scannable. */}
+      <div className="mt-2 text-[11px] text-steel-500 sm:hidden">
+        {full ? 'Filling…' : `${table.open_seats} of ${table.seats_total} seats open`}
       </div>
-
-      {/* Pot */}
-      <div className="shrink-0 text-right">
-        <div className="text-[10px] uppercase tracking-[0.2em] text-steel-500">
-          Pot
-        </div>
-        <div className="font-display text-lg font-bold leading-none text-accent">
-          {money(parseFloat(table.wager_amount) * size * 2)}
-        </div>
-      </div>
-
-      {/* Seats left */}
-      <div className="w-24 shrink-0 text-right text-xs text-steel-400">
-        {full ? 'Filling…' : `${table.open_seats} seat${table.open_seats === 1 ? '' : 's'} left`}
-      </div>
-
-      <button
-        type="button"
-        onClick={mine ? onWatch : onJoin}
-        disabled={busy || (!mine && (full || !fits))}
-        title={
-          !mine && !fits && !full
-            ? canQueue
-              ? `No side has ${partySize} seats free for your party`
-              : 'Only your party leader can queue'
-            : undefined
-        }
-        className={`w-28 shrink-0 rounded-md px-4 py-2.5 text-xs font-semibold uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-          mine
-            ? 'border border-line-dark text-steel-100 hover:border-accent hover:text-accent'
-            : 'bg-accent text-white hover:bg-accent-dark'
-        }`}
-      >
-        {busy ? '…' : mine ? 'Open' : !fits && !full ? 'No room' : 'Join'}
-      </button>
     </div>
   )
 }
 
-// A side's seats: filled ones show the player, empty ones show as gaps — so a
-// 5v5 that needs two more reads at a glance.
-function Side({ seats, size }) {
+// A side's seats: filled ones show the player, empty ones as gaps. Pills wrap
+// when the side doesn't fit, so a 5v5 on a phone becomes two neat rows of
+// pills rather than a horizontal overflow.
+function Side({ team, seats, size }) {
   return (
-    <div className="flex flex-1 items-center gap-1.5">
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="mr-1 font-display text-[10px] font-bold uppercase text-steel-500 md:hidden">
+        {team}
+      </span>
       {Array.from({ length: size }).map((_, i) => {
         const s = seats[i]
         return s ? (
           <span
             key={i}
             title={s.player.faceit_username}
-            className="max-w-[7rem] truncate rounded border border-line-dark bg-graphite-800 px-2 py-1 text-xs text-steel-100"
+            className="max-w-[7rem] truncate rounded border border-line-dark bg-graphite-800 px-2 py-1 text-[11px] text-steel-100"
           >
             {s.player.faceit_username}
           </span>
         ) : (
           <span
             key={i}
-            className="h-[26px] w-8 rounded border border-dashed border-line-dark"
+            className="h-6 w-8 rounded border border-dashed border-line-dark"
             aria-label="empty seat"
           />
         )

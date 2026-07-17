@@ -164,10 +164,12 @@ export default function PartyWidget({ user, onParty }) {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-stretch gap-3 p-5">
-        {/* Members. Solo (no party) renders just the user's own card plus
-            ghost slots — clicking a slot creates the party and copies the
-            invite link, which is the entire onboarding. */}
+      {/* Members strip. Solo shows the user card plus a single Invite tile
+          (one CTA, not four empty seats — small screens couldn't fit them and
+          they never carried more meaning than the one). Once in a party the
+          strip lists every member and a single Invite tile that says how
+          many seats remain. */}
+      <div className="flex flex-wrap items-stretch gap-2 p-4 sm:gap-3 sm:p-5">
         {(party?.members ?? [{ player: user, is_leader: true, entitlement: 0 }])
           .filter((m) => m.player)
           .map((m) => (
@@ -186,23 +188,26 @@ export default function PartyWidget({ user, onParty }) {
             />
           ))}
 
-        {Array.from({ length: party ? emptySlots : 4 }).map((_, i) => (
+        {(!party || emptySlots > 0) && (
           <button
-            key={i}
             type="button"
             onClick={() =>
               party ? copyInvite(party.invite_code) : createAndInvite()
             }
             disabled={busy === 'create'}
-            title={party ? 'Copy invite link' : 'Create a party'}
-            className="flex min-h-[7.5rem] w-24 flex-col items-center justify-center rounded-lg border border-dashed border-line-dark text-steel-500 transition-colors hover:border-accent hover:text-accent disabled:opacity-40"
+            title={party ? 'Copy invite link' : 'Create a party & copy the invite link'}
+            className="flex min-h-[6.5rem] flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-line-dark px-3 text-steel-500 transition-colors hover:border-accent hover:text-accent disabled:opacity-40 sm:min-h-[7.5rem] sm:min-w-[6rem] sm:flex-none"
           >
             <span className="text-3xl font-light leading-none">+</span>
             <span className="mt-2 px-1 text-center text-[9px] uppercase tracking-widest">
-              {copied ? 'Link copied' : 'Invite'}
+              {copied
+                ? 'Link copied'
+                : party
+                  ? `Invite (${emptySlots})`
+                  : 'Create & invite'}
             </span>
           </button>
-        ))}
+        )}
       </div>
 
       {/* Pool controls: anyone funds; the leader can pay members out. */}
