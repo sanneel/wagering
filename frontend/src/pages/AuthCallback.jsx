@@ -4,7 +4,6 @@ import { useAuth } from '../context/AuthContext'
 import InlineError from '../components/InlineError'
 import Logo from '../components/Logo'
 
-// The backend completes FACEIT OAuth and redirects here with ?token=<jwt>.
 export default function AuthCallback() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
@@ -12,20 +11,45 @@ export default function AuthCallback() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    const token = params.get('token')
     const err = params.get('error')
     if (err) {
       setError(err)
       return
     }
-    if (!token) {
-      setError('No session token returned from FACEIT.')
+
+    const code = params.get('code')
+    if (!code) {
+      setError('No code returned from authentication.')
       return
     }
-    localStorage.setItem('token', token)
-    // Land on the tables — signing in is a means to an end, and the end is
-    // taking a seat. The CTA that started this promised exactly that.
-    fetchMe().finally(() => navigate('/tables', { replace: true }))
+
+    // Exchange the code for a token
+    fetch('/auth/exchange', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const errData = await res.json()
+          throw new Error(errData.detail || 'Failed to exchange code')
+        }
+        return res.json()
+      })
+      .then((data) => {
+        const token = data.access_token
+        if (!token) {
+          throw new Error('No token in response')
+        }
+        localStorage.setItem('token', token)
+        // Land on the tables — signing in is a means to an end, and the end is
+        // taking a seat. The CTA that started this promised exactly that.
+        return fetchMe().finally(() => navigate('/tables', { replace: true }))
+      })
+      .catch((err) => {
+        console.error(err)
+        setError(err.message || 'Authentication failed')
+      })
   }, [params, fetchMe, navigate])
 
   return (

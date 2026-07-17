@@ -1,8 +1,10 @@
 """FACEIT OAuth login/registration + demo login."""
 import logging
+import secrets
+import time
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,15 +14,12 @@ from app.database import get_db
 from app.models import User
 from app.ratelimit import rate_limit
 from app.schemas import FaceitAuthRequest, TokenResponse, UserOut
-from app.security import create_access_token
+from app.security import create_access_token, decode_access_token
 from app.services import demo, faceit
+from app import auth_code
 
 logger = logging.getLogger("auth")
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-
-def _frontend_token_redirect(token: str) -> RedirectResponse:
-    return RedirectResponse(url=f"{settings.frontend_url}/auth/callback?token={token}")
 
 
 async def _upsert_user(db: AsyncSession, userinfo: dict) -> User:
@@ -71,7 +70,10 @@ async def faceit_start():
     if settings.demo_mode or not settings.faceit_client_id:
         user = await demo.create_demo_user()
         token, _ = create_access_token(user.id)
-        return _frontend_token_redirect(token)
+        # Generate a one-time code and store the token
+        code = secrets.token_urlsafe(32)
+        await auth_code.store_auth_code(code, token, expires_in=60)
+        return RedirectResponse(url=f"{settings.frontend_url}/auth/callback?code={code}")
 
     params = {
         "client_id": settings.faceit_client_id,
@@ -91,7 +93,8 @@ async def faceit_callback(
     db: AsyncSession = Depends(get_db),
 ):
     """FACEIT redirects here after the user authorizes; finish login and hand a
-    JWT back to the frontend at /auth/callback?token=<jwt>."""
+    JWT back to the frontend at /auth/callback?code=<code> (one-time code exchange).
+    """
     if error:
         return RedirectResponse(url=f"{settings.frontend_url}/auth/callback?error={error}")
     if not code:
@@ -110,8 +113,11 @@ async def faceit_callback(
             url=f"{settings.frontend_url}/auth/callback?error=faceit_auth_failed"
         )
 
+    # Generate a one-time code and store the token
     token, _ = create_access_token(user.id)
-    return _frontend_token_redirect(token)
+    code = secrets.token_urlsafe(32)
+    await auth_code.store_auth_code(code, token, expires_in=60)
+    return RedirectResponse(url=f"{settings.frontend_url}/auth/callback?code={code}")
 
 
 @router.post("/faceit", response_model=TokenResponse)
@@ -130,6 +136,42 @@ async def faceit_auth(
 
     user = await _upsert_user(db, userinfo)
     token, expires_in = create_access_token(user.id)
+    return TokenResponse(
+        access_token=token,
+        expires_in=expires_in,
+        user=UserOut.model_validate(user),
+    )
+
+
+@router.post("/exchange", response_model=TokenResponse)
+async def exchange_auth_code(
+    body: dict, db: AsyncSession = Depends(get_db)
+) -> TokenResponse:
+    """Exchange a one-time code for a JWT token (single-use)."""
+    code = body.get("code")
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing code")
+    token = await auth_code.consume_auth_code(code)
+    if token is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired code")
+
+    # Decode token to get expiration and user ID
+    try:
+        payload = decode_access_token(token)
+        exp = payload.get("exp")
+        now = int(time.time())
+        if exp is None:
+            raise HTTPException(status_code=400, detail="Invalid token")
+        expires_in = max(0, exp - now)
+        user_id = int(payload.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    # Fetch user from DB
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=401, detail="User not found")
+
     return TokenResponse(
         access_token=token,
         expires_in=expires_in,

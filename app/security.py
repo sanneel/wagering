@@ -27,6 +27,18 @@ def create_access_token(user_id: int) -> tuple[str, int]:
     return token, expires_in
 
 
+def decode_access_token(token: str) -> dict:
+    """
+    Decode a JWT token and return the payload.
+    Raises JWTError if the token is invalid.
+    """
+    try:
+        payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+        return payload
+    except JWTError:
+        raise
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(_bearer),
     db: AsyncSession = Depends(get_db),
