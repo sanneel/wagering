@@ -106,6 +106,11 @@ class Settings(BaseSettings):
     # label in the frontend's FORMATS map — no migration.
     allowed_team_sizes: str = "1,2,5"
 
+    # Trusted proxy IPs that can set X-Forwarded-For. Comma-separated.
+    # Only these IPs' X-Forwarded-For headers are trusted for geo lookup.
+    # In production, set to your load balancer/reverse proxy IP(s).
+    trusted_proxies: str = "127.0.0.1,::1"
+
     @field_validator("blocked_regions", "geo_exempt_paths")
     @classmethod
     def _strip(cls, v: str) -> str:
@@ -134,6 +139,10 @@ class Settings(BaseSettings):
         return sorted(
             {int(s.strip()) for s in self.allowed_team_sizes.split(",") if s.strip()}
         )
+
+    @property
+    def trusted_proxies_set(self) -> set[str]:
+        return {p.strip() for p in self.trusted_proxies.split(",") if p.strip()}
 
 
 @lru_cache

@@ -48,9 +48,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+dev_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+]
+prod_origins = ["https://1v1wager.com"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://1v1wager.com"] if settings.environment == "production" else ["*"],
+    allow_origins=prod_origins if settings.environment == "production" else dev_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -20,14 +20,20 @@ logger = logging.getLogger("geofence")
 
 
 def _client_ip(request: Request) -> str:
-    # Trust the left-most X-Forwarded-For entry only if set by your edge proxy.
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        return xff.split(",")[0].strip()
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip.strip()
-    return request.client.host if request.client else ""
+    # Trust X-Forwarded-For only if the immediate peer (request.client.host) is in trusted_proxies.
+    # This prevents clients from spoofing the header.
+    if request.client:
+        peer_ip = request.client.host
+        trusted_proxies = settings.trusted_proxies_set
+        if peer_ip in trusted_proxies:
+            xff = request.headers.get("x-forwarded-for")
+            if xff:
+                return xff.split(",")[0].strip()
+            real_ip = request.headers.get("x-real-ip")
+            if real_ip:
+                return real_ip.strip()
+        return peer_ip
+    return ""
 
 
 def _is_blocked_region(result: geo.GeoResult) -> bool:
