@@ -13,7 +13,12 @@ from app.config import settings
 from app.database import get_db
 from app.models import User
 from app.ratelimit import rate_limit
-from app.schemas import FaceitAuthRequest, TokenResponse, UserOut
+from app.schemas import (
+    CodeExchangeRequest,
+    FaceitAuthRequest,
+    TokenResponse,
+    UserOut,
+)
 from app.security import create_access_token, decode_access_token
 from app.services import demo, faceit
 from app import auth_code
@@ -145,13 +150,10 @@ async def faceit_auth(
 
 @router.post("/exchange", response_model=TokenResponse)
 async def exchange_auth_code(
-    body: dict, db: AsyncSession = Depends(get_db)
+    body: CodeExchangeRequest, db: AsyncSession = Depends(get_db)
 ) -> TokenResponse:
     """Exchange a one-time code for a JWT token (single-use)."""
-    code = body.get("code")
-    if not code:
-        raise HTTPException(status_code=400, detail="Missing code")
-    token = await auth_code.consume_auth_code(code)
+    token = await auth_code.consume_auth_code(body.code)
     if token is None:
         raise HTTPException(status_code=400, detail="Invalid or expired code")
 

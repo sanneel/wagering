@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import client from '../api/client'
 import InlineError from '../components/InlineError'
 import Logo from '../components/Logo'
 
@@ -23,20 +24,11 @@ export default function AuthCallback() {
       return
     }
 
-    // Exchange the code for a token
-    fetch('/auth/exchange', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code }),
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const errData = await res.json()
-          throw new Error(errData.detail || 'Failed to exchange code')
-        }
-        return res.json()
-      })
-      .then((data) => {
+    // Exchange the code for a token via the shared API client so the request
+    // hits the backend (API_BASE), not the frontend origin.
+    client
+      .post('/auth/exchange', { code })
+      .then(({ data }) => {
         const token = data.access_token
         if (!token) {
           throw new Error('No token in response')
@@ -48,7 +40,8 @@ export default function AuthCallback() {
       })
       .catch((err) => {
         console.error(err)
-        setError(err.message || 'Authentication failed')
+        const detail = err?.response?.data?.detail
+        setError(detail || err.message || 'Authentication failed')
       })
   }, [params, fetchMe, navigate])
 

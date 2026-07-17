@@ -20,6 +20,10 @@ class TokenResponse(BaseModel):
     user: "UserOut"
 
 
+class CodeExchangeRequest(BaseModel):
+    code: str = Field(..., min_length=1, max_length=128)
+
+
 # ─── User ───────────────────────────────────────────────────────────────
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
