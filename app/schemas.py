@@ -207,8 +207,15 @@ class DepositResponse(BaseModel):
 
 class WithdrawRequest(BaseModel):
     amount: Decimal = Field(..., gt=0)
-    # Optional for now — a real payout destination is collected later.
-    destination: str | None = None
+    # Optional for now — a real payout destination is collected later. When
+    # supplied it must look like a plausible payout handle (wallet address,
+    # payout email/ref): 6–128 chars, no whitespace or control/injection chars.
+    destination: str | None = Field(
+        default=None,
+        min_length=6,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9@.:_+\-]+$",
+    )
 
 
 class WithdrawResponse(BaseModel):

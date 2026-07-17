@@ -85,3 +85,26 @@ async def mark_webhook_seen(event_id: str) -> bool:
         f"webhook:seen:{event_id}", "1", nx=True, ex=WEBHOOK_DEDUPE_TTL
     )
     return bool(created)
+
+
+# ─── Rate limiting ──────────────────────────────────────────────────────
+async def rate_limit_ok(key: str, *, limit: int, window_seconds: int) -> bool:
+    """Fixed-window per-key limiter shared across all app instances via Redis.
+
+    Returns True while the caller is under `limit` requests in the current
+    window. Fail-open: when Redis is disabled or unreachable we allow the
+    request rather than lock everyone out (matches the rest of this module —
+    Redis is a best-effort layer, never a hard dependency for demo/local).
+    """
+    if not settings.redis_enabled:
+        return True
+    try:
+        full_key = f"ratelimit:{key}"
+        count = await redis_client.incr(full_key)
+        if count == 1:
+            # First hit in this window — start the countdown.
+            await redis_client.expire(full_key, window_seconds)
+        return count <= limit
+    except RedisError as exc:
+        logger.warning("redis rate_limit failed for %s: %s", key, exc)
+        return True

@@ -19,7 +19,7 @@ from app.services import geo
 logger = logging.getLogger("geofence")
 
 
-def _client_ip(request: Request) -> str:
+def client_ip(request: Request) -> str:
     # Trust X-Forwarded-For only if the immediate peer (request.client.host) is in trusted_proxies.
     # This prevents clients from spoofing the header.
     if request.client:
@@ -53,7 +53,7 @@ class GeofencingMiddleware(BaseHTTPMiddleware):
         if any(path.startswith(p) for p in settings.geo_exempt_paths_list):
             return await call_next(request)
 
-        ip = _client_ip(request)
+        ip = client_ip(request)
 
         # Local/private IPs (dev, internal health checks) bypass geo checks.
         if not ip or geo.is_private_ip(ip):

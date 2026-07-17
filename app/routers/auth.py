@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.models import User
+from app.ratelimit import rate_limit
 from app.schemas import FaceitAuthRequest, TokenResponse, UserOut
 from app.security import create_access_token
 from app.services import demo, faceit
@@ -136,7 +137,11 @@ async def faceit_auth(
     )
 
 
-@router.post("/demo", response_model=TokenResponse)
+@router.post(
+    "/demo",
+    response_model=TokenResponse,
+    dependencies=[rate_limit(limit=5, window_seconds=60, scope="auth-demo")],
+)
 async def demo_login() -> TokenResponse:
     """Create a throwaway guest account with a starting balance (demo mode only)."""
     if not settings.demo_mode:
