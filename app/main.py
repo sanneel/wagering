@@ -21,10 +21,16 @@ logger = logging.getLogger("app")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # In production use Alembic migrations instead of create_all.
-    if settings.environment != "production":
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+    # Startup must be fail-soft: on serverless every cold start runs this, and a
+    # transient DB/Redis hiccup here would crash the whole function instead of
+    # failing one request. Log and continue; handlers surface errors per-request.
+    if settings.auto_create_tables:
+        # For real production prefer Alembic migrations over create_all.
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+        except Exception:  # noqa: BLE001
+            logger.exception("startup create_all failed; continuing without it")
     if settings.redis_enabled:
         try:
             await redis_client.ping()
@@ -34,10 +40,18 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("redis disabled (redis_enabled=false)")
     # Demo mode has only one human, so without a few standing bot tables the
-    # lobby's browse list would always be empty.
-    await demo.seed_open_tables()
+    # lobby's browse list would always be empty. Already guarded internally, but
+    # keep it off the startup critical path so a DB blip can't take the app down.
+    if settings.demo_mode:
+        try:
+            await demo.seed_open_tables()
+        except Exception:  # noqa: BLE001
+            logger.exception("demo seed failed; continuing")
     yield
-    await redis_client.aclose()
+    try:
+        await redis_client.aclose()
+    except Exception:  # noqa: BLE001
+        pass
     await engine.dispose()
 
 
@@ -55,9 +69,17 @@ dev_origins = [
 ]
 prod_origins = ["https://1v1wager.com"]
 
+# Always allow the configured frontend origin (set FRONTEND_URL to your deployed
+# Vercel domain) plus any extra origins from CORS_ORIGINS. Dev origins stay
+# allowed outside production so local work keeps hitting a deployed API. With
+# allow_credentials=True we can't use "*", so the set must be explicit.
+allowed_origins = {settings.frontend_url, *prod_origins, *settings.cors_origins_list}
+if settings.environment != "production":
+    allowed_origins.update(dev_origins)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=prod_origins if settings.environment == "production" else dev_origins,
+    allow_origins=sorted(o for o in allowed_origins if o),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

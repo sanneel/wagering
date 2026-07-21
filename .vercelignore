@@ -1,0 +1,10 @@
+# The backend function doesn't need the frontend, local DB, or dev cruft.
+frontend/
+.venv/
+.worktrees/
+.agents/
+.codex-chrome-profile/
+*.db
+*.png
+*.jpg
+README.md

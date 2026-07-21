@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://wager:wager@localhost:5432/onev1wager"
     db_pool_size: int = 10
     db_max_overflow: int = 20
+    # Create tables on startup (fail-soft). Fine for the demo; use Alembic in a
+    # real production deployment instead.
+    auto_create_tables: bool = True
+
+    # Comma-separated extra CORS origins to allow (beyond FRONTEND_URL). Handy
+    # when the frontend has both a stable and a per-deploy Vercel domain.
+    cors_origins: str = ""
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
@@ -115,6 +122,10 @@ class Settings(BaseSettings):
     @classmethod
     def _strip(cls, v: str) -> str:
         return v.strip()
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     @property
     def blocked_regions_set(self) -> set[str]:

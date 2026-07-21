@@ -1,4 +1,5 @@
 """Async SQLAlchemy engine, session factory, and Base."""
+import os
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
@@ -7,8 +8,12 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import NullPool
 
 from app.config import settings
+
+# Vercel (and most FaaS platforms) set this on the running function.
+_is_serverless = bool(os.getenv("VERCEL"))
 
 # SQLite (used for the zero-dependency local demo) doesn't accept QueuePool
 # sizing args; Postgres does. Configure accordingly.
@@ -17,6 +22,17 @@ _engine_kwargs: dict = {"echo": settings.debug}
 if _is_sqlite:
     # Wait (don't error) when the single writer is busy.
     _engine_kwargs["connect_args"] = {"timeout": 30}
+elif _is_serverless:
+    # Serverless functions scale horizontally and freeze between requests, so a
+    # per-instance QueuePool would both exhaust Postgres connection limits and
+    # hand out dead connections. Keep no pool of our own and connect through a
+    # pooled endpoint (Neon "-pooler" host / Supabase :6543 / pgbouncer).
+    # statement_cache_size=0 is required for pgbouncer transaction pooling;
+    # ssl="require" satisfies managed Postgres (Neon/Supabase) which mandate TLS.
+    _engine_kwargs.update(
+        poolclass=NullPool,
+        connect_args={"statement_cache_size": 0, "ssl": "require"},
+    )
 else:
     _engine_kwargs.update(
         pool_size=settings.db_pool_size,
