@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import client from '../api/client'
 import Logo from '../components/Logo'
 import InlineError from '../components/InlineError'
-import Wheel from '../components/Wheel'
+import PrizeCounter from '../components/PrizeCounter'
 import { useAuth } from '../context/AuthContext'
 import { money, errMsg } from '../lib/format'
 
@@ -14,7 +14,7 @@ const faceitRoom = (id) => `https://www.faceit.com/en/cs2/room/${id}`
 
 const STATUS_TEXT = {
   PENDING: 'Waiting on entrants',
-  LOCKED: 'Bracket set — spinning the wheel',
+  LOCKED: 'Bracket set — spinning the counter',
   LIVE: 'Bracket in progress',
   FINISHED: 'Bracket complete',
   CANCELLED: 'SpinCounter cancelled. Entries refunded',
@@ -37,9 +37,8 @@ export default function SpinLobby() {
   const [t, setT] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
-  const [wheelDone, setWheelDone] = useState(false)
+  const [revealed, setRevealed] = useState(false)
   const timerRef = useRef(null)
-  const configRef = useRef(null)
 
   const load = useCallback(async () => {
     try {
@@ -60,13 +59,6 @@ export default function SpinLobby() {
   }, [id])
 
   useEffect(() => {
-    // The wheel needs the segment list; config is public and static.
-    client
-      .get('/spincounter/config')
-      .then(({ data }) => {
-        configRef.current = data
-      })
-      .catch(() => {})
     load()
     timerRef.current = setInterval(load, POLL_MS)
     return () => clearInterval(timerRef.current)
@@ -107,23 +99,39 @@ export default function SpinLobby() {
   // header reflects any payout without a manual reload.
   const finished = t?.status === 'FINISHED'
   useEffect(() => {
-    if (finished || (locked && wheelDone)) fetchMe()
+    if (finished || (locked && revealed)) fetchMe()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finished, wheelDone])
+  }, [finished, revealed])
 
-  const wheelSegments = configRef.current?.wheel ?? []
-  const showWheelSpin = locked && t.wheel_segment_index != null && wheelSegments.length > 0
+  // Once the bracket locks the jackpot is drawn; the counter reveals it.
+  const showReveal = locked && t.wheel_winner != null
 
-  const rounds = useMemo(() => {
-    if (!t) return []
+  // A centered, two-sided bracket: the final sits in the middle, earlier rounds
+  // split into a left and a right subtree that feed into it. The left subtree is
+  // the lower half of each round's slots, the right the upper half; the right
+  // columns render inner→outer so round 1 lands on the far edges (NIKO vs MONESY
+  // · FINAL · DONK vs ZOWY), never in one flat line.
+  const bracket = useMemo(() => {
+    if (!t) return null
+    const R = t.rounds_total
     const byRound = {}
     for (const g of t.games) {
       ;(byRound[g.round] ||= []).push(g)
     }
-    return Object.keys(byRound)
-      .map(Number)
-      .sort((a, b) => a - b)
-      .map((r) => ({ round: r, games: byRound[r].sort((a, b) => a.slot - b.slot) }))
+    for (const r of Object.keys(byRound)) {
+      byRound[r].sort((a, b) => a.slot - b.slot)
+    }
+    const finalGame = (byRound[R] || [])[0] || null
+    const left = []
+    const right = []
+    for (let r = 1; r < R; r++) {
+      const games = byRound[r] || []
+      const half = games.length / 2
+      left.push({ round: r, games: games.filter((g) => g.slot < half) })
+      right.push({ round: r, games: games.filter((g) => g.slot >= half) })
+    }
+    right.reverse() // inner (semifinal) nearest the final, outer on the edge
+    return { R, left, right, finalGame }
   }, [t])
 
   // The current player's live game (if any) drives the FACEIT call to action.
@@ -196,15 +204,21 @@ export default function SpinLobby() {
               )}
             </div>
 
-            {/* ── Wheel of Fortune ── */}
-            {showWheelSpin && (
+            {/* ── The counter spins for the jackpot ── */}
+            {showReveal && (
               <div className="mt-10 flex flex-col items-center">
-                <Wheel
-                  segments={wheelSegments}
-                  landOn={t.wheel_segment_index}
-                  onSettle={() => setWheelDone(true)}
-                />
-                <WheelResult t={t} meId={meId} revealed={wheelDone} />
+                <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-accent">
+                  Jackpot counter
+                </div>
+                <div className="mt-4 rounded-2xl border border-line-dark bg-graphite-900/60 p-6">
+                  <PrizeCounter
+                    amount={parseFloat(t.wheel_prize)}
+                    landOn
+                    slots={4}
+                    onSettle={() => setRevealed(true)}
+                  />
+                </div>
+                <RevealResult t={t} meId={meId} revealed={revealed} />
               </div>
             )}
 
@@ -275,59 +289,58 @@ export default function SpinLobby() {
               </div>
             )}
 
-            {/* ── Bracket ── */}
-            {locked && rounds.length > 0 && (
+            {/* ── Bracket (semifinals flank the final) ── */}
+            {locked && bracket?.finalGame && (
               <div className="mt-12">
                 <h2 className="mb-5 text-[10px] font-medium uppercase tracking-[0.28em] text-steel-500">
                   Bracket
                 </h2>
                 <div className="overflow-x-auto pb-2">
-                  <div className="flex min-w-max gap-10">
-                    {rounds.map(({ round, games }) => (
-                      <div key={round} className="spin-col min-w-[15rem] flex-1">
-                        <div className="mb-3 text-center text-[10px] font-semibold uppercase tracking-[0.2em] text-steel-500">
-                          {roundLabel(round, t.rounds_total)}
-                        </div>
-                        <div className="spin-round h-[calc(100%-1.5rem)]">
-                          {games.map((g) => (
-                            <div key={g.id} className="spin-match">
-                              <GameCard g={g} meId={meId} />
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                  <div className="flex min-w-max items-stretch justify-center gap-10">
+                    {bracket.left.map((col) => (
+                      <BracketColumn
+                        key={`l-${col.round}`}
+                        label={roundLabel(col.round, bracket.R)}
+                        games={col.games}
+                        feed="right"
+                        meId={meId}
+                      />
                     ))}
-                    {/* Champion node caps the bracket. */}
-                    <div className="spin-col flex min-w-[11rem] flex-col">
-                      <div className="mb-3 text-center text-[10px] font-semibold uppercase tracking-[0.2em] text-steel-500">
-                        Champion
+
+                    {/* Center: the final. */}
+                    <div className="spin-col flex min-w-[15rem] flex-col">
+                      <div className="mb-3 text-center text-[10px] font-semibold uppercase tracking-[0.2em] text-accent">
+                        Final
                       </div>
                       <div className="spin-round h-[calc(100%-1.5rem)]">
                         <div className="spin-match">
-                          <div
-                            className={`flex h-full min-h-[5rem] flex-col items-center justify-center rounded-lg border p-4 text-center ${
-                              t.champion
-                                ? 'border-accent/50 bg-accent/10'
-                                : 'border-dashed border-line-dark'
-                            }`}
-                          >
-                            <span className="text-2xl">🏆</span>
-                            <span
-                              className={`mt-1 font-display text-sm font-bold italic ${
-                                t.champion ? 'text-white' : 'text-steel-600'
-                              }`}
-                            >
-                              {t.champion ? t.champion.faceit_username : 'TBD'}
-                            </span>
-                            {t.champion && (
-                              <span className="mt-0.5 text-[10px] text-accent">
-                                {money(t.prize_pool)}
+                          <GameCard g={bracket.finalGame} meId={meId} emphasis />
+                          {t.champion && (
+                            <div className="mt-3 flex items-center justify-center gap-2 text-center">
+                              <span className="text-lg">🏆</span>
+                              <span className="font-display text-sm font-bold italic text-white">
+                                {t.champion.faceit_username}
+                                {t.champion.id === meId && (
+                                  <span className="ml-1.5 text-[10px] not-italic uppercase text-accent">
+                                    you
+                                  </span>
+                                )}
                               </span>
-                            )}
-                          </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
+
+                    {bracket.right.map((col) => (
+                      <BracketColumn
+                        key={`r-${col.round}`}
+                        label={roundLabel(col.round, bracket.R)}
+                        games={col.games}
+                        feed="left"
+                        meId={meId}
+                      />
+                    ))}
                   </div>
                 </div>
               </div>
@@ -420,7 +433,7 @@ export default function SpinLobby() {
                 {isCreator
                   ? 'Cancelling refunds every entry.'
                   : joined
-                    ? 'Leaving refunds your entry. Once the bracket fills, the wheel spins and there is no leaving.'
+                    ? 'Leaving refunds your entry. Once the bracket fills, the counter spins and there is no leaving.'
                     : 'Enter from the brackets list to take a seat.'}
               </p>
             )}
@@ -431,11 +444,11 @@ export default function SpinLobby() {
   )
 }
 
-function WheelResult({ t, meId, revealed }) {
+function RevealResult({ t, meId, revealed }) {
   if (!revealed) {
     return (
       <p className="mt-6 animate-pulse text-sm font-medium uppercase tracking-[0.2em] text-steel-400">
-        Spinning…
+        Rolling…
       </p>
     )
   }
@@ -444,7 +457,7 @@ function WheelResult({ t, meId, revealed }) {
   return (
     <div className="mt-6 text-center">
       <div className="text-[10px] uppercase tracking-[0.24em] text-steel-500">
-        Wheel of Fortune
+        Jackpot
       </div>
       <div className="mt-1 font-display text-2xl font-black italic text-white">
         {money(t.wheel_prize)} to {won ? won.faceit_username : '—'}
@@ -457,13 +470,39 @@ function WheelResult({ t, meId, revealed }) {
   )
 }
 
-function GameCard({ g, meId }) {
+// One round's games as a bracket column, feeding toward the centre final.
+function BracketColumn({ label, games, feed, meId }) {
+  return (
+    <div
+      className={`spin-col flex min-w-[14rem] flex-col ${
+        feed === 'right' ? 'spin-feed-right' : 'spin-feed-left'
+      }`}
+    >
+      <div className="mb-3 text-center text-[10px] font-semibold uppercase tracking-[0.2em] text-steel-500">
+        {label}
+      </div>
+      <div className="spin-round h-[calc(100%-1.5rem)]">
+        {games.map((g) => (
+          <div key={g.id} className="spin-match">
+            <GameCard g={g} meId={meId} />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function GameCard({ g, meId, emphasis = false }) {
   const live = g.status === 'LIVE'
   const done = g.status === 'FINISHED'
   return (
     <div
       className={`rounded-lg border p-3 ${
-        live ? 'border-accent/40 bg-graphite-900' : 'border-line-dark bg-graphite-900'
+        emphasis
+          ? 'border-accent/50 bg-accent/5 ring-1 ring-accent/20'
+          : live
+            ? 'border-accent/40 bg-graphite-900'
+            : 'border-line-dark bg-graphite-900'
       }`}
     >
       <Player

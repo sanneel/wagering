@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import client from '../api/client'
 import Logo from '../components/Logo'
 import InlineError from '../components/InlineError'
-import Wheel from '../components/Wheel'
+import PrizeCounter from '../components/PrizeCounter'
 import { useAuth } from '../context/AuthContext'
 import { money, errMsg } from '../lib/format'
 
@@ -151,18 +151,24 @@ export default function SpinCounter() {
             </h1>
             <p className="mt-3 max-w-md text-sm leading-relaxed text-steel-400">
               A 1v1 knockout bracket. Everyone pays the same entry. The moment
-              the bracket fills, the Wheel of Fortune spins and drops a jackpot
-              on one lucky entrant — then you fight through the bracket for the
-              prize pool. Two ways to win, one buy-in.
+              the bracket fills, the counter spins and drops a jackpot on one
+              lucky entrant — then you fight through the bracket for the prize
+              pool. Two ways to win, one buy-in.
             </p>
             <div className="mt-5 flex flex-wrap gap-3 text-xs">
-              <Badge>Wheel up to {money(topPrize)}</Badge>
+              <Badge>Jackpot up to {money(topPrize)}</Badge>
               <Badge>Best of {config?.rounds_best_of ?? 3}</Badge>
               <Badge>Winner takes the pool</Badge>
             </div>
           </div>
-          <div className="w-full max-w-[18rem] justify-self-center">
-            {wheel.length > 0 && <Wheel segments={wheel} idle />}
+          <div className="w-full max-w-[20rem] justify-self-center rounded-2xl border border-line-dark bg-graphite-900/60 p-6">
+            <div className="mb-3 text-center text-[10px] font-semibold uppercase tracking-[0.24em] text-steel-500">
+              The counter spins
+            </div>
+            <PrizeCounter idle slots={4} />
+            <div className="mt-3 text-center text-[11px] text-steel-500">
+              lands on your jackpot up to {money(topPrize)}
+            </div>
           </div>
         </div>
 
@@ -379,7 +385,7 @@ function Summary({ size, fee, balance, topPrize, busy, onOpen }) {
           {valid ? money(pool) : '-'}
         </div>
         <div className="mt-1 text-[10px] text-steel-400">
-          plus a wheel jackpot up to {money(topPrize)} for one lucky entrant
+          plus a counter jackpot up to {money(topPrize)} for one lucky entrant
         </div>
       </div>
 
@@ -503,8 +509,8 @@ function EmptyState({ onOpen }) {
         No brackets open
       </p>
       <p className="mx-auto mt-2 max-w-sm text-sm text-steel-400">
-        Nobody&apos;s spinning yet. Open a bracket and the wheel drops the moment
-        it fills.
+        Nobody&apos;s spinning yet. Open a bracket and the counter drops the
+        moment it fills.
       </p>
       <button
         type="button"

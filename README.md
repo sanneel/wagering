@@ -80,7 +80,7 @@ Which formats are accepted is **config, not schema**: `ALLOWED_TEAM_SIZES`
 `FORMAT_COPY` — no migration, no new endpoints. `GET /formats` publishes the
 list so the UI builds its pickers from the server rather than hardcoding them.
 
-## SpinCounter: 1v1 bracket tournaments with a Wheel of Fortune
+## SpinCounter: 1v1 bracket tournaments with a jackpot counter
 
 A **SpinCounter** is a single-elimination 1v1 bracket. Everyone pays the same
 `entry_fee`, escrowed at join exactly like a table seat (a `tournament_entries`
@@ -93,13 +93,15 @@ The moment the last seat fills, the bracket **locks in one transaction**:
 
 1. the prize pool is fixed at `entry_fee × size` (100% RTP by default — the
    champion takes the whole pot, `SPIN_RAKE_PERCENT=0`, same ethos as tables);
-2. the **Wheel of Fortune** spins once — a weighted-random segment
-   (`SPIN_WHEEL_SEGMENTS`, `amount:weight` pairs) picks a jackpot, and a
-   randomly-drawn entrant wins it. The jackpot is a **house-funded promotional
-   bonus**, credited as a `BONUS` ledger entry — it does **not** come out of the
-   pool, which is why it can dwarf the buy-in. It raises the winner's rollover
-   (`SPIN_WHEEL_ROLLOVER`) so it can't be cashed straight out; the segment
-   weights govern the house's expected promo cost;
+2. the **jackpot counter** spins once (a slot/odometer reveal in the UI) — a
+   weighted-random segment (`SPIN_WHEEL_SEGMENTS`, `amount:weight` pairs) picks
+   a jackpot, and a randomly-drawn entrant wins it. The jackpot is a
+   **house-funded promotional bonus**, credited as a `BONUS` ledger entry — it
+   does **not** come out of the pool, which is why it can dwarf the buy-in. It
+   raises the winner's rollover (`SPIN_WHEEL_ROLLOVER`) so it can't be cashed
+   straight out; the segment weights govern the house's expected promo cost.
+   (The draw is still named `wheel_*` in the schema — the counter is just its
+   visual; swapping the reveal never touched the money model);
 3. seeds are drawn at random and the round-1 games are created.
 
 Games are then played 1v1, **best-of `SPIN_ROUNDS_BEST_OF`** (default 3). Each
@@ -109,10 +111,10 @@ final resolves and the champion is paid the pool. Every entrant played, so every
 entry burns its owner's rollover at settle (losers included), the same
 settle-time rule matches use.
 
-So a player has **two ways to win from one buy-in**: the wheel jackpot (luck)
+So a player has **two ways to win from one buy-in**: the counter jackpot (luck)
 and the bracket prize pool (skill). All money moves through `ledger` and every
 mutation locks the tournament row first, the same concurrency discipline as
-tables. In demo mode bots fill the bracket, the wheel spins, and every game
+tables. In demo mode bots fill the bracket, the counter spins, and every game
 auto-plays through to a champion.
 
 ## Parties and the Team Balance

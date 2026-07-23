@@ -46,18 +46,71 @@
   opacity: 0;
 }
 
-/* SpinCounter: slow idle rotation for the hero wheel */
-@keyframes spinIdle {
+/* SpinCounter prize reel: a slot/odometer digit tile that rolls to the prize */
+.prize-reel {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.6rem;
+  background: linear-gradient(#ffffff, #e7e7ec);
+  box-shadow:
+    inset 0 2px 3px rgba(0, 0, 0, 0.18),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.12),
+    0 6px 14px rgba(0, 0, 0, 0.45);
+}
+/* top/bottom vignette so a rolling digit fades in and out of the window */
+.prize-reel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.3),
+    transparent 28%,
+    transparent 72%,
+    rgba(0, 0, 0, 0.3)
+  );
+}
+/* the split-flap seam across the middle of the tile */
+.prize-reel::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  z-index: 2;
+  background: rgba(0, 0, 0, 0.14);
+}
+.prize-strip {
+  display: flex;
+  flex-direction: column;
+  will-change: transform;
+}
+.prize-digit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Barlow Condensed', 'Inter', sans-serif;
+  font-weight: 800;
+  font-style: italic;
+  font-size: 2.4rem;
+  line-height: 1;
+  color: #0b0c0e;
+}
+@keyframes prizeIdle {
   from {
-    transform: rotate(0deg);
+    transform: translateY(0);
   }
   to {
-    transform: rotate(360deg);
+    transform: translateY(-560px); /* 10 cells * 56px — seamless loop */
   }
 }
-.wheel-idle {
-  animation: spinIdle 26s linear infinite;
-  transform-origin: 100px 100px;
+.prize-strip-idle {
+  animation-name: prizeIdle;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
 }
 
 /* SpinCounter: soft pulse for a live-match call to action */
@@ -74,9 +127,10 @@
   animation: livePulse 2s ease-out infinite;
 }
 
-/* SpinCounter bracket: forward-feed connector spurs between rounds. Robust at
-   any spacing — a short line leaves each game to the right and enters each
-   later-round game from the left, so the progression reads without fragile
+/* SpinCounter bracket: a centered, two-sided tree. Left-hand rounds feed
+   rightward toward the FINAL in the middle; right-hand rounds mirror and feed
+   leftward. Connector spurs are keyed to the side a column feeds, so the
+   progression reads for 4- and 8-player brackets alike without fragile
    vertical-join maths. */
 .spin-round {
   display: flex;
@@ -87,11 +141,8 @@
 .spin-match {
   position: relative;
 }
-/* Spurs are keyed off the column's position among its siblings: every column
-   but the last sends a line right, every column but the first receives one from
-   the left. Robust at any spacing and for 2/4/8-player brackets alike. */
-.spin-col:not(:last-child) .spin-match::after,
-.spin-col:not(:first-child) .spin-match::before {
+.spin-feed-right .spin-match::after,
+.spin-feed-left .spin-match::before {
   content: '';
   position: absolute;
   top: 50%;
@@ -99,10 +150,10 @@
   height: 2px;
   background: #26292f;
 }
-.spin-col:not(:last-child) .spin-match::after {
+.spin-feed-right .spin-match::after {
   right: -2.5rem;
 }
-.spin-col:not(:first-child) .spin-match::before {
+.spin-feed-left .spin-match::before {
   left: -2.5rem;
 }
 
