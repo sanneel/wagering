@@ -36,8 +36,8 @@ from app.models import (
     TransactionType,
     User,
 )
-from app.redis_client import set_match_state
-from app.services import ledger
+from app.redis_client import link_faceit_game, resolve_faceit_game, set_match_state
+from app.services import faceit, ledger
 
 logger = logging.getLogger("spincounter")
 
@@ -206,6 +206,10 @@ async def join_tournament(
         raise TournamentError("you are already in this tournament")
     await db.refresh(t)
     await _sync_state(db, t)
+    # Escrow + lock are committed before any FACEIT call, so a FACEIT hiccup
+    # can never un-escrow anyone — the round-1 games stay LIVE and are retried.
+    if filled:
+        await ensure_faceit_matches(db, t.id)
     return t
 
 
@@ -401,8 +405,6 @@ async def report_game(
     ).scalar_one_or_none()
     if t is None:
         raise TournamentError("tournament not found")
-    if t.status not in (SpinStatus.LOCKED, SpinStatus.LIVE):
-        raise TournamentError(f"tournament is {t.status.value}, cannot report")
 
     game = (
         await db.execute(
@@ -414,8 +416,13 @@ async def report_game(
     ).scalar_one_or_none()
     if game is None:
         raise TournamentError("game not found")
+    # Idempotency FIRST, before the tournament-status gate: a duplicate
+    # finished-webhook for the final arrives after the tournament is already
+    # FINISHED, and must be a quiet no-op rather than an error.
     if game.status == SpinStatus.FINISHED:
         return t  # already reported
+    if t.status not in (SpinStatus.LOCKED, SpinStatus.LIVE):
+        raise TournamentError(f"tournament is {t.status.value}, cannot report")
     if game.player_a_id is None or game.player_b_id is None:
         raise TournamentError("this game's players are not both decided yet")
     if winner_user_id not in (game.player_a_id, game.player_b_id):
@@ -502,6 +509,133 @@ async def _settle(db: AsyncSession, t: Tournament, *, champion_id: int) -> None:
     t.status = SpinStatus.FINISHED
     t.finished_at = datetime.now(timezone.utc)
     logger.info("SpinCounter %s settled: champion %s took %s", t.id, champion_id, payout)
+
+
+# ─── FACEIT: one private match per bracket game ─────────────────────────
+
+
+async def _faceit_ids(db: AsyncSession, user_ids: list[int]) -> dict[int, str]:
+    rows = (
+        await db.execute(
+            select(User.id, User.faceit_id).where(User.id.in_(user_ids))
+        )
+    ).all()
+    return {uid: fid for uid, fid in rows}
+
+
+async def ensure_faceit_matches(db: AsyncSession, tournament_id: int) -> None:
+    """Create a FACEIT private match for every ready game that lacks one.
+
+    A bracket game is ready once both players are known (status LIVE). Each such
+    game becomes its own 1v1 FACEIT match; the match id is stored on the game and
+    linked in Redis so the webhook can resolve results back to it.
+
+    Best-effort and idempotent: a game that already has a faceit_match_id is
+    skipped, and a FACEIT failure leaves the game LIVE-without-id so a later call
+    (next report, or a retry) can wire it up — it never blocks the bracket or
+    touches escrow. No-op in demo mode, where the simulation reports games
+    directly.
+    """
+    if settings.demo_mode:
+        return
+    games = (
+        await db.execute(
+            select(TournamentGame).where(
+                TournamentGame.tournament_id == tournament_id,
+                TournamentGame.status == SpinStatus.LIVE,
+                TournamentGame.faceit_match_id.is_(None),
+                TournamentGame.player_a_id.is_not(None),
+                TournamentGame.player_b_id.is_not(None),
+            )
+        )
+    ).scalars().all()
+    if not games:
+        return
+
+    ids = {g.player_a_id for g in games} | {g.player_b_id for g in games}
+    faceit_map = await _faceit_ids(db, list(ids))
+
+    for game in games:
+        a = faceit_map.get(game.player_a_id)
+        b = faceit_map.get(game.player_b_id)
+        if not a or not b:
+            continue
+        try:
+            faceit_match_id = await faceit.create_private_match(
+                [a], [b], match_ref=f"spin-{tournament_id}-g{game.id}"
+            )
+        except faceit.FaceitError:
+            logger.exception(
+                "FACEIT match creation failed for SpinCounter %s game %s",
+                tournament_id,
+                game.id,
+            )
+            continue
+        game.faceit_match_id = faceit_match_id
+        await db.commit()
+        await link_faceit_game(faceit_match_id, tournament_id, game.id)
+
+
+async def report_game_by_faceit(
+    db: AsyncSession,
+    *,
+    faceit_match_id: str,
+    winner_faceit_id: str,
+    score_a: int | None = None,
+    score_b: int | None = None,
+) -> Tournament | None:
+    """Settle the bracket game behind a FACEIT match (webhook entry point).
+
+    Resolves the game (Redis first, then Postgres), maps the reported winning
+    FACEIT id to the seat's user, and reports it. Returns None if the match is
+    not one of ours. After advancing it wires up FACEIT for any newly-ready game.
+    """
+    resolved = await resolve_faceit_game(faceit_match_id)
+    if resolved is None:
+        row = (
+            await db.execute(
+                select(TournamentGame.tournament_id, TournamentGame.id).where(
+                    TournamentGame.faceit_match_id == faceit_match_id
+                )
+            )
+        ).first()
+        if row is None:
+            return None
+        tournament_id, game_id = int(row[0]), int(row[1])
+    else:
+        tournament_id, game_id = resolved
+
+    game = (
+        await db.execute(
+            select(TournamentGame).where(TournamentGame.id == game_id)
+        )
+    ).scalar_one_or_none()
+    if game is None:
+        return None
+    winner_uid = None
+    for uid in (game.player_a_id, game.player_b_id):
+        if uid is None:
+            continue
+        fid = (
+            await db.execute(select(User.faceit_id).where(User.id == uid))
+        ).scalar_one_or_none()
+        if fid == winner_faceit_id:
+            winner_uid = uid
+            break
+    if winner_uid is None:
+        raise TournamentError("reported winner is not in this bracket game")
+
+    t = await report_game(
+        db,
+        tournament_id=tournament_id,
+        game_id=game_id,
+        winner_user_id=winner_uid,
+        score_a=score_a,
+        score_b=score_b,
+    )
+    # A win may have made the next round's game ready — wire its FACEIT match.
+    await ensure_faceit_matches(db, tournament_id)
+    return t
 
 
 # ─── helpers for routers / demo ─────────────────────────────────────────

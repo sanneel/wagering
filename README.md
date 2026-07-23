@@ -258,7 +258,23 @@ encapsulated but depend on your specific organizer/merchant account — verify
 them against the live API contracts before going to production. In particular
 `create_private_match` now sends a roster per side (`teams.faction1/faction2`)
 to cover 2v2 and 5v5; the exact team payload needs checking against the
-organizer API once that account exists. The compliance
+organizer API once that account exists.
+
+SpinCounter rides the same FACEIT rails: each bracket game becomes its own 1v1
+FACEIT match. `tournament_service.ensure_faceit_matches` creates one for every
+game the moment both players are known (round-1 games at lock, later rounds as
+each advances), links it in Redis (`faceit:game:*`), and `/webhook/faceit`
+resolves a finished event back to the game and advances the bracket
+(`report_game_by_faceit`). It is best-effort and idempotent — a duplicate
+finished webhook is a no-op, and a FACEIT creation failure leaves the game ready
+but matchless so a later advance retries it. One caveat to wire before going
+live: if the **round-1** creations all fail (no later advance to retry them),
+the bracket has no way to start — add an operator/cron retry of
+`ensure_faceit_matches` for LOCKED tournaments, the SpinCounter analogue of the
+"operator can cancel→refund a stuck LOCKED table" path. None of this runs in
+demo mode, where the simulation reports games directly.
+
+The compliance
 posture here (geofencing, VPN blocking, KYC-gated withdrawals via `is_verified`)
 is a technical baseline, not legal advice; real-money wagering is heavily
 regulated and you should confirm licensing for every jurisdiction you serve.

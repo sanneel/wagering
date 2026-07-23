@@ -75,6 +75,45 @@ async def resolve_faceit_match(faceit_match_id: str) -> int | None:
         return None
 
 
+# ─── SpinCounter game reverse-lookup ────────────────────────────────────
+# Each bracket game is its own FACEIT match, so the webhook needs to resolve a
+# faceit_match_id to a tournament game the same way it resolves table matches.
+#   faceit:game:{faceit_match_id} -> "{tournament_id}:{game_id}"
+
+
+async def link_faceit_game(
+    faceit_match_id: str, tournament_id: int, game_id: int
+) -> None:
+    if not settings.redis_enabled:
+        return
+    try:
+        await redis_client.set(
+            f"faceit:game:{faceit_match_id}",
+            f"{tournament_id}:{game_id}",
+            ex=MATCH_STATE_TTL,
+        )
+    except RedisError as exc:
+        logger.warning("redis link_faceit_game failed for %s: %s", faceit_match_id, exc)
+
+
+async def resolve_faceit_game(faceit_match_id: str) -> tuple[int, int] | None:
+    """Return (tournament_id, game_id) for a faceit match, or None on miss.
+
+    On a Redis miss/outage the webhook falls back to a Postgres lookup.
+    """
+    if not settings.redis_enabled:
+        return None
+    try:
+        val = await redis_client.get(f"faceit:game:{faceit_match_id}")
+        if not val or ":" not in val:
+            return None
+        tid, gid = val.split(":", 1)
+        return int(tid), int(gid)
+    except (RedisError, ValueError) as exc:
+        logger.warning("redis resolve_faceit_game failed for %s: %s", faceit_match_id, exc)
+        return None
+
+
 async def mark_webhook_seen(event_id: str) -> bool:
     """Return True if this is the first time we've seen event_id (i.e. process it)."""
     if not settings.redis_enabled:

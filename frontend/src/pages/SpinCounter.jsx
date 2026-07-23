@@ -162,7 +162,7 @@ export default function SpinCounter() {
             </div>
           </div>
           <div className="w-full max-w-[18rem] justify-self-center">
-            {wheel.length > 0 && <Wheel segments={wheel} />}
+            {wheel.length > 0 && <Wheel segments={wheel} idle />}
           </div>
         </div>
 

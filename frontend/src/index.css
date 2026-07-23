@@ -46,6 +46,66 @@
   opacity: 0;
 }
 
+/* SpinCounter: slow idle rotation for the hero wheel */
+@keyframes spinIdle {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+.wheel-idle {
+  animation: spinIdle 26s linear infinite;
+  transform-origin: 100px 100px;
+}
+
+/* SpinCounter: soft pulse for a live-match call to action */
+@keyframes livePulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(232, 69, 10, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(232, 69, 10, 0);
+  }
+}
+.live-pulse {
+  animation: livePulse 2s ease-out infinite;
+}
+
+/* SpinCounter bracket: forward-feed connector spurs between rounds. Robust at
+   any spacing — a short line leaves each game to the right and enters each
+   later-round game from the left, so the progression reads without fragile
+   vertical-join maths. */
+.spin-round {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+  gap: 1rem;
+}
+.spin-match {
+  position: relative;
+}
+/* Spurs are keyed off the column's position among its siblings: every column
+   but the last sends a line right, every column but the first receives one from
+   the left. Robust at any spacing and for 2/4/8-player brackets alike. */
+.spin-col:not(:last-child) .spin-match::after,
+.spin-col:not(:first-child) .spin-match::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 2.5rem;
+  height: 2px;
+  background: #26292f;
+}
+.spin-col:not(:last-child) .spin-match::after {
+  right: -2.5rem;
+}
+.spin-col:not(:first-child) .spin-match::before {
+  left: -2.5rem;
+}
+
 html,
 body,
 #root {

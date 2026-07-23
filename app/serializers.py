@@ -235,6 +235,7 @@ def _tournament_base(
             score_a=g.score_a,
             score_b=g.score_b,
             status=g.status,
+            faceit_match_id=g.faceit_match_id,
         )
         for g in games
     ]

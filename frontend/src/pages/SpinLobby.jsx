@@ -9,6 +9,9 @@ import { money, errMsg } from '../lib/format'
 
 const POLL_MS = 3000
 
+// FACEIT hosts each 1v1 in a match room; a game carries its id once created.
+const faceitRoom = (id) => `https://www.faceit.com/en/cs2/room/${id}`
+
 const STATUS_TEXT = {
   PENDING: 'Waiting on entrants',
   LOCKED: 'Bracket set — spinning the wheel',
@@ -123,6 +126,21 @@ export default function SpinLobby() {
       .map((r) => ({ round: r, games: byRound[r].sort((a, b) => a.slot - b.slot) }))
   }, [t])
 
+  // The current player's live game (if any) drives the FACEIT call to action.
+  const myLiveGame = useMemo(() => {
+    if (!t || !meId) return null
+    return (
+      t.games.find(
+        (g) =>
+          g.status === 'LIVE' &&
+          (g.player_a?.id === meId || g.player_b?.id === meId)
+      ) || null
+    )
+  }, [t, meId])
+  // Am I still alive in the bracket (seated, not eliminated, no champion yet)?
+  const myEntry = t?.entries?.find((e) => e.player.id === meId)
+  const stillIn = joined && myEntry && !myEntry.eliminated && !finished
+
   return (
     <div className="min-h-screen bg-graphite-950 text-steel-100">
       <header className="border-b border-line-dark">
@@ -190,6 +208,55 @@ export default function SpinLobby() {
               </div>
             )}
 
+            {/* ── Your live match: the FACEIT call to action ── */}
+            {myLiveGame && (
+              <div className="live-pulse mx-auto mt-10 max-w-xl rounded-xl border border-accent/50 bg-accent/10 p-5">
+                <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-between">
+                  <div className="text-center sm:text-left">
+                    <div className="flex items-center justify-center gap-2 sm:justify-start">
+                      <span className="relative flex h-2 w-2">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
+                      </span>
+                      <span className="text-[10px] font-semibold uppercase tracking-[0.24em] text-accent">
+                        Your match is live
+                      </span>
+                    </div>
+                    <div className="mt-1.5 font-display text-xl font-bold italic text-white">
+                      {myLiveGame.player_a?.faceit_username} vs{' '}
+                      {myLiveGame.player_b?.faceit_username}
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-steel-400">
+                      {roundLabel(myLiveGame.round, t.rounds_total)} · best of{' '}
+                      {t.rounds_best_of}
+                    </div>
+                  </div>
+                  {myLiveGame.faceit_match_id ? (
+                    <a
+                      href={faceitRoom(myLiveGame.faceit_match_id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="shrink-0 rounded-md bg-accent px-6 py-3 text-xs font-semibold uppercase tracking-wide text-white transition-colors hover:bg-accent-dark"
+                    >
+                      Open FACEIT room
+                    </a>
+                  ) : (
+                    <span className="shrink-0 rounded-md border border-line-dark px-6 py-3 text-xs font-semibold uppercase tracking-wide text-steel-400">
+                      Setting up match…
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── Still in it, waiting on another match ── */}
+            {stillIn && !myLiveGame && locked && (
+              <p className="mt-8 text-center text-sm text-steel-400">
+                You&apos;re through — waiting on the other match to set your next
+                opponent.
+              </p>
+            )}
+
             {/* ── Champion banner ── */}
             {finished && t.champion && (
               <div className="mx-auto mt-10 max-w-md rounded-xl border border-accent/40 bg-accent/10 p-6 text-center">
@@ -211,24 +278,56 @@ export default function SpinLobby() {
             {/* ── Bracket ── */}
             {locked && rounds.length > 0 && (
               <div className="mt-12">
-                <h2 className="mb-4 text-[10px] font-medium uppercase tracking-[0.28em] text-steel-500">
+                <h2 className="mb-5 text-[10px] font-medium uppercase tracking-[0.28em] text-steel-500">
                   Bracket
                 </h2>
                 <div className="overflow-x-auto pb-2">
-                  <div className="flex min-w-max gap-6">
+                  <div className="flex min-w-max gap-10">
                     {rounds.map(({ round, games }) => (
-                      <div
-                        key={round}
-                        className="flex min-w-[15rem] flex-1 flex-col justify-around gap-4"
-                      >
-                        <div className="text-center text-[10px] font-semibold uppercase tracking-[0.2em] text-steel-500">
+                      <div key={round} className="spin-col min-w-[15rem] flex-1">
+                        <div className="mb-3 text-center text-[10px] font-semibold uppercase tracking-[0.2em] text-steel-500">
                           {roundLabel(round, t.rounds_total)}
                         </div>
-                        {games.map((g) => (
-                          <GameCard key={g.id} g={g} meId={meId} />
-                        ))}
+                        <div className="spin-round h-[calc(100%-1.5rem)]">
+                          {games.map((g) => (
+                            <div key={g.id} className="spin-match">
+                              <GameCard g={g} meId={meId} />
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ))}
+                    {/* Champion node caps the bracket. */}
+                    <div className="spin-col flex min-w-[11rem] flex-col">
+                      <div className="mb-3 text-center text-[10px] font-semibold uppercase tracking-[0.2em] text-steel-500">
+                        Champion
+                      </div>
+                      <div className="spin-round h-[calc(100%-1.5rem)]">
+                        <div className="spin-match">
+                          <div
+                            className={`flex h-full min-h-[5rem] flex-col items-center justify-center rounded-lg border p-4 text-center ${
+                              t.champion
+                                ? 'border-accent/50 bg-accent/10'
+                                : 'border-dashed border-line-dark'
+                            }`}
+                          >
+                            <span className="text-2xl">🏆</span>
+                            <span
+                              className={`mt-1 font-display text-sm font-bold italic ${
+                                t.champion ? 'text-white' : 'text-steel-600'
+                              }`}
+                            >
+                              {t.champion ? t.champion.faceit_username : 'TBD'}
+                            </span>
+                            {t.champion && (
+                              <span className="mt-0.5 text-[10px] text-accent">
+                                {money(t.prize_pool)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

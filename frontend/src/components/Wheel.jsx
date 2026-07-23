@@ -31,7 +31,7 @@ function slicePath(index, count) {
  * `landOn` becomes a number the wheel spins several turns and settles with that
  * slice under the top pointer, then calls `onSettle`.
  */
-export default function Wheel({ segments, landOn = null, onSettle }) {
+export default function Wheel({ segments, landOn = null, onSettle, idle = false }) {
   const count = segments.length
   const span = 360 / count
   const [rotation, setRotation] = useState(0)
@@ -83,13 +83,18 @@ export default function Wheel({ segments, landOn = null, onSettle }) {
       >
         <circle cx={C} cy={C} r={R + 3} fill="#0B0C0E" stroke="#26292F" strokeWidth="2" />
         <g
-          style={{
-            transformOrigin: '100px 100px',
-            transform: `rotate(${rotation}deg)`,
-            transition: spinning
-              ? 'transform 4s cubic-bezier(0.16, 1, 0.3, 1)'
-              : 'none',
-          }}
+          className={idle && landOn == null ? 'wheel-idle' : undefined}
+          style={
+            idle && landOn == null
+              ? undefined
+              : {
+                  transformOrigin: '100px 100px',
+                  transform: `rotate(${rotation}deg)`,
+                  transition: spinning
+                    ? 'transform 4s cubic-bezier(0.16, 1, 0.3, 1)'
+                    : 'none',
+                }
+          }
         >
           {segments.map((s, i) => {
             const amt = parseFloat(s.amount)

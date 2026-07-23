@@ -11,7 +11,7 @@ from app.config import settings
 from app.database import get_db
 from app.models import Transaction, TransactionType
 from app.redis_client import mark_webhook_seen, resolve_faceit_match
-from app.services import ledger, match_service, payed
+from app.services import ledger, match_service, payed, tournament_service
 
 logger = logging.getLogger("webhook")
 router = APIRouter(prefix="/webhook", tags=["webhook"])
@@ -67,40 +67,65 @@ async def faceit_webhook(
     if not await mark_webhook_seen(f"faceit:{event_id}"):
         return {"status": "duplicate_ignored"}
 
+    finished = event in ("match_status_finished", "match_finished")
+    cancelled = event in (
+        "match_status_cancelled",
+        "match_status_aborted",
+        "match_cancelled",
+        "match_aborted",
+    )
+    live = event in (
+        "match_status_ready",
+        "match_status_configuring",
+        "match_status_ongoing",
+    )
+
     match_id = await _resolve_match_id(db, faceit_match_id)
-    if match_id is None:
-        logger.warning("faceit webhook for unknown match %s", faceit_match_id)
-        return {"status": "unknown_match"}
+    if match_id is not None:
+        try:
+            if finished:
+                winner_faceit_id = _extract_winner(data)
+                if not winner_faceit_id:
+                    logger.warning("finished event without winner for %s", faceit_match_id)
+                    return {"status": "no_winner"}
+                await match_service.settle_finished(
+                    db, match_id=match_id, winner_faceit_id=winner_faceit_id
+                )
+                return {"status": "settled"}
+            if cancelled:
+                await match_service.cancel_and_refund(db, match_id=match_id)
+                return {"status": "refunded"}
+            if live:
+                await match_service.mark_live(db, match_id=match_id)
+                return {"status": "live"}
+        except match_service.MatchError as exc:
+            logger.error("faceit webhook settle error: %s", exc)
+            raise HTTPException(status_code=409, detail=str(exc))
+        return {"status": "ignored", "event": event}
 
-    try:
-        if event in ("match_status_finished", "match_finished"):
-            winner_faceit_id = _extract_winner(data)
-            if not winner_faceit_id:
-                logger.warning("finished event without winner for %s", faceit_match_id)
-                return {"status": "no_winner"}
-            await match_service.settle_finished(
-                db, match_id=match_id, winner_faceit_id=winner_faceit_id
+    # Not a table match — it may be a SpinCounter bracket game (one FACEIT match
+    # per 1v1). Only a finished event advances the bracket; a single game being
+    # cancelled/aborted is left for FACEIT to recreate rather than tearing down
+    # the whole tournament, and a live/ready event needs no bookkeeping here.
+    if finished:
+        winner_faceit_id = _extract_winner(data)
+        if not winner_faceit_id:
+            logger.warning("finished event without winner for %s", faceit_match_id)
+            return {"status": "no_winner"}
+        try:
+            t = await tournament_service.report_game_by_faceit(
+                db,
+                faceit_match_id=faceit_match_id,
+                winner_faceit_id=winner_faceit_id,
             )
-            return {"status": "settled"}
+        except tournament_service.TournamentError as exc:
+            logger.error("faceit webhook bracket report error: %s", exc)
+            raise HTTPException(status_code=409, detail=str(exc))
+        if t is not None:
+            return {"status": "bracket_advanced"}
 
-        if event in (
-            "match_status_cancelled",
-            "match_status_aborted",
-            "match_cancelled",
-            "match_aborted",
-        ):
-            await match_service.cancel_and_refund(db, match_id=match_id)
-            return {"status": "refunded"}
-
-        if event in ("match_status_ready", "match_status_configuring", "match_status_ongoing"):
-            await match_service.mark_live(db, match_id=match_id)
-            return {"status": "live"}
-
-    except match_service.MatchError as exc:
-        logger.error("faceit webhook settle error: %s", exc)
-        raise HTTPException(status_code=409, detail=str(exc))
-
-    return {"status": "ignored", "event": event}
+    logger.warning("faceit webhook for unknown match %s", faceit_match_id)
+    return {"status": "unknown_match"}
 
 
 def _extract_winner(data: dict) -> str | None:

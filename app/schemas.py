@@ -195,6 +195,8 @@ class TournamentGameOut(BaseModel):
     score_a: int = 0
     score_b: int = 0
     status: SpinStatus
+    # The FACEIT match room for this 1v1, once created (null in demo / pre-ready).
+    faceit_match_id: str | None = None
 
 
 class TournamentOut(BaseModel):
