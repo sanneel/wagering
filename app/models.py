@@ -72,6 +72,7 @@ class TransactionType(str, enum.Enum):
     WIN = "WIN"             # payout credited to the winning side
     REFUND = "REFUND"       # escrow returned on cancel
     FEE = "FEE"             # house cut, taken on the profit part of a withdrawal
+    BONUS = "BONUS"         # house-funded promo credit (SpinCounter wheel jackpot)
 
 
 class User(Base):
@@ -278,6 +279,187 @@ class MatchParticipant(Base):
     user: Mapped["User"] = relationship(lazy="noload")
 
 
+class SpinStatus(str, enum.Enum):
+    """Lifecycle of a SpinCounter tournament and of each game inside it.
+
+    PENDING    tournament is still filling its bracket / a game's players
+               aren't both known yet
+    LOCKED     bracket full, entries escrowed, wheel spun, round-1 games created
+    LIVE       a game is being played (reported started)
+    FINISHED   settled — a game has a winner, or the tournament has a champion
+    CANCELLED  aborted before lock; every entry refunded
+    """
+
+    PENDING = "PENDING"
+    LOCKED = "LOCKED"
+    LIVE = "LIVE"
+    FINISHED = "FINISHED"
+    CANCELLED = "CANCELLED"
+
+
+class Tournament(Base):
+    """A SpinCounter: a single-elimination 1v1 bracket with a Wheel of Fortune.
+
+    Players buy in with `entry_fee` (escrowed at join, exactly like a table
+    seat). When the last seat fills the bracket locks: the wheel spins once to
+    award a house-funded jackpot to one lucky entrant, seeds are drawn, and the
+    round-1 games are created. The bracket then plays out 1v1, best-of
+    `rounds_best_of`, until one player is champion and takes the prize pool.
+
+    `size` is a power of two (2/4/8): 2 is a straight final, 4 is
+    semifinals + final, 8 adds quarterfinals. Nothing here is per-size, so the
+    allowed set is config, not schema.
+    """
+
+    __tablename__ = "tournaments"
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True)
+    creator_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id"), index=True
+    )
+    # Bracket size: number of players. 2 => final only, 4 => semis+final.
+    size: Mapped[int] = mapped_column(Integer, default=4, index=True)
+    # Buy-in per player, escrowed at join. Prize pool = entry_fee * size.
+    entry_fee: Mapped[Decimal] = mapped_column(Money)
+    # Rounds a game is played to (best-of). A player needs (n//2 + 1) round wins.
+    rounds_best_of: Mapped[int] = mapped_column(Integer, default=3)
+
+    status: Mapped[SpinStatus] = mapped_column(
+        SAEnum(SpinStatus, name="spin_status"),
+        default=SpinStatus.PENDING,
+        index=True,
+    )
+    # Set at lock: what the champion takes (pool - rake).
+    prize_pool: Mapped[Decimal] = mapped_column(Money, default=Decimal("0.00"))
+    rake_amount: Mapped[Decimal] = mapped_column(Money, default=Decimal("0.00"))
+
+    # Wheel of Fortune result, filled at lock. The jackpot is a house-funded
+    # promotional bonus (not drawn from the pot — that is why it can dwarf the
+    # buy-in), credited to one randomly-drawn entrant and carrying a rollover
+    # requirement so it can't be instantly cashed out.
+    wheel_prize: Mapped[Decimal] = mapped_column(Money, default=Decimal("0.00"))
+    wheel_winner_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id"), nullable=True
+    )
+    # Which segment the wheel landed on — the frontend animates to this index.
+    wheel_segment_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    champion_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id"), nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    locked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    entries: Mapped[list["TournamentEntry"]] = relationship(
+        back_populates="tournament", lazy="noload", cascade="all, delete-orphan"
+    )
+    games: Mapped[list["TournamentGame"]] = relationship(
+        back_populates="tournament", lazy="noload", cascade="all, delete-orphan"
+    )
+
+
+class TournamentEntry(Base):
+    """One seat in a bracket: a player who paid the buy-in.
+
+    A row here means the entry fee is already escrowed — entries are only
+    written in the same transaction as the ESCROW debit, so a seat can never
+    exist without money behind it. `seed` is null until the bracket locks and
+    seeds are drawn.
+    """
+
+    __tablename__ = "tournament_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "tournament_id", "user_id", name="uq_entry_tournament_user"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True)
+    tournament_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("tournaments.id"), index=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id"), index=True
+    )
+    # Bracket position, 0..size-1, drawn at lock. Null while still filling.
+    seed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # What this player escrowed — refunds follow it, and it is the stake that
+    # burns their rollover when the tournament settles.
+    contributed: Mapped[Decimal] = mapped_column(Money, default=Decimal("0.00"))
+    eliminated: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    tournament: Mapped["Tournament"] = relationship(
+        back_populates="entries", lazy="noload"
+    )
+    user: Mapped["User"] = relationship(lazy="noload")
+
+
+class TournamentGame(Base):
+    """One 1v1 match in the bracket.
+
+    Games are addressed by (round, slot). Round 1 holds size/2 games; the winner
+    of round r slot s advances into round r+1 slot s//2 — as player A when s is
+    even, player B when s is odd. Players are null until both feeder games
+    resolve; the round-1 games are seeded directly at lock.
+    """
+
+    __tablename__ = "tournament_games"
+    __table_args__ = (
+        UniqueConstraint(
+            "tournament_id", "round", "slot", name="uq_game_tournament_round_slot"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPK, primary_key=True)
+    tournament_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("tournaments.id"), index=True
+    )
+    # 1 == first round (round-of-`size`). The final is round log2(size).
+    round: Mapped[int] = mapped_column(Integer)
+    slot: Mapped[int] = mapped_column(Integer)
+
+    player_a_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id"), nullable=True
+    )
+    player_b_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id"), nullable=True
+    )
+    winner_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id"), nullable=True
+    )
+    score_a: Mapped[int] = mapped_column(Integer, default=0)
+    score_b: Mapped[int] = mapped_column(Integer, default=0)
+
+    status: Mapped[SpinStatus] = mapped_column(
+        SAEnum(SpinStatus, name="spin_status"),
+        default=SpinStatus.PENDING,
+    )
+    faceit_match_id: Mapped[str | None] = mapped_column(
+        String(128), unique=True, index=True, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    tournament: Mapped["Tournament"] = relationship(
+        back_populates="games", lazy="noload"
+    )
+
+
 class Transaction(Base):
     __tablename__ = "transactions"
 
@@ -304,3 +486,12 @@ class Transaction(Base):
 Index("ix_transactions_user_created", Transaction.user_id, Transaction.created_at)
 # Browsing open tables: filter by status + format, newest first.
 Index("ix_matches_status_size", Match.status, Match.team_size, Match.created_at)
+# Browsing open SpinCounters: filter by status + size, newest first.
+Index(
+    "ix_tournaments_status_size",
+    Tournament.status,
+    Tournament.size,
+    Tournament.created_at,
+)
+# The current user's SpinCounter history joins through entries.
+Index("ix_entries_user", TournamentEntry.user_id, TournamentEntry.tournament_id)

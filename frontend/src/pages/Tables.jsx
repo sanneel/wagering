@@ -144,6 +144,13 @@ export default function Tables() {
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
           <Logo to="/dashboard" light />
           <div className="flex items-center gap-5">
+            <button
+              type="button"
+              onClick={() => navigate('/spincounter')}
+              className="text-xs font-semibold uppercase tracking-wide text-steel-400 transition-colors hover:text-steel-100"
+            >
+              SpinCounter
+            </button>
             <div className="text-right">
               <div className="text-[10px] uppercase tracking-[0.24em] text-steel-500">
                 Balance

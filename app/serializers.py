@@ -13,8 +13,17 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Match, MatchParticipant, MatchStatus, Team, User
-from app.services import party_service
+from app.models import (
+    Match,
+    MatchParticipant,
+    MatchStatus,
+    Team,
+    Tournament,
+    TournamentEntry,
+    TournamentGame,
+    User,
+)
+from app.services import party_service, tournament_service
 from app.schemas import (
     MatchOut,
     MyMatchOut,
@@ -22,6 +31,9 @@ from app.schemas import (
     RecentMatchOut,
     SeatOut,
     TableOut,
+    TournamentEntryOut,
+    TournamentGameOut,
+    TournamentOut,
 )
 
 
@@ -153,6 +165,150 @@ async def serialize_recent(
             )
         )
     return out
+
+
+# ─── SpinCounter serialization ──────────────────────────────────────────
+
+
+async def _tournament_entries(
+    db: AsyncSession, tournament_ids: list[int]
+) -> dict[int, list[TournamentEntry]]:
+    if not tournament_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(TournamentEntry)
+            .where(TournamentEntry.tournament_id.in_(tournament_ids))
+            .order_by(TournamentEntry.seed.nullslast(), TournamentEntry.id)
+        )
+    ).scalars().all()
+    out: dict[int, list[TournamentEntry]] = {tid: [] for tid in tournament_ids}
+    for r in rows:
+        out[r.tournament_id].append(r)
+    return out
+
+
+async def _tournament_games(
+    db: AsyncSession, tournament_ids: list[int]
+) -> dict[int, list[TournamentGame]]:
+    if not tournament_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(TournamentGame)
+            .where(TournamentGame.tournament_id.in_(tournament_ids))
+            .order_by(TournamentGame.round, TournamentGame.slot)
+        )
+    ).scalars().all()
+    out: dict[int, list[TournamentGame]] = {tid: [] for tid in tournament_ids}
+    for r in rows:
+        out[r.tournament_id].append(r)
+    return out
+
+
+def _tournament_base(
+    t: Tournament,
+    entries: list[TournamentEntry],
+    games: list[TournamentGame],
+    users: dict[int, User],
+    me_id: int | None,
+) -> dict:
+    entry_out = [
+        TournamentEntryOut(
+            player=_player(users, e.user_id),
+            seed=e.seed,
+            eliminated=e.eliminated,
+            is_wheel_winner=(e.user_id == t.wheel_winner_id),
+            is_champion=(e.user_id == t.champion_id),
+        )
+        for e in entries
+        if users.get(e.user_id)
+    ]
+    game_out = [
+        TournamentGameOut(
+            id=g.id,
+            round=g.round,
+            slot=g.slot,
+            player_a=_player(users, g.player_a_id),
+            player_b=_player(users, g.player_b_id),
+            winner_id=g.winner_id,
+            score_a=g.score_a,
+            score_b=g.score_b,
+            status=g.status,
+        )
+        for g in games
+    ]
+    return dict(
+        id=t.id,
+        creator_id=t.creator_id,
+        size=t.size,
+        entry_fee=t.entry_fee,
+        rounds_best_of=t.rounds_best_of,
+        status=t.status,
+        prize_pool=t.prize_pool,
+        rake_amount=t.rake_amount,
+        wheel_prize=t.wheel_prize,
+        wheel_segment_index=t.wheel_segment_index,
+        wheel_winner=_player(users, t.wheel_winner_id),
+        champion=_player(users, t.champion_id),
+        rounds_total=tournament_service._rounds_for(t.size),
+        entries=entry_out,
+        games=game_out,
+        entrants=len(entries),
+        open_seats=max(0, t.size - len(entries)),
+        joined=any(e.user_id == me_id for e in entries) if me_id else False,
+        creator=_player(users, t.creator_id),
+        created_at=t.created_at,
+        finished_at=t.finished_at,
+    )
+
+
+async def serialize_tournament(
+    db: AsyncSession, t: Tournament, me_id: int | None = None
+) -> TournamentOut:
+    entries = (await _tournament_entries(db, [t.id]))[t.id]
+    games = (await _tournament_games(db, [t.id]))[t.id]
+    uids: set[int] = {e.user_id for e in entries}
+    uids.add(t.creator_id)
+    for g in games:
+        uids.update({g.player_a_id, g.player_b_id})
+    if t.wheel_winner_id:
+        uids.add(t.wheel_winner_id)
+    if t.champion_id:
+        uids.add(t.champion_id)
+    users = await _load_users(db, uids)
+    return TournamentOut(**_tournament_base(t, entries, games, users, me_id))
+
+
+async def serialize_tournaments(
+    db: AsyncSession, tournaments: list[Tournament], me_id: int | None = None
+) -> list[TournamentOut]:
+    ids = [t.id for t in tournaments]
+    entries_by = await _tournament_entries(db, ids)
+    games_by = await _tournament_games(db, ids)
+    uids: set[int] = set()
+    for t in tournaments:
+        uids.add(t.creator_id)
+        uids.update(e.user_id for e in entries_by.get(t.id, []))
+        for g in games_by.get(t.id, []):
+            uids.update({g.player_a_id, g.player_b_id})
+        if t.wheel_winner_id:
+            uids.add(t.wheel_winner_id)
+        if t.champion_id:
+            uids.add(t.champion_id)
+    users = await _load_users(db, uids)
+    return [
+        TournamentOut(
+            **_tournament_base(
+                t,
+                entries_by.get(t.id, []),
+                games_by.get(t.id, []),
+                users,
+                me_id,
+            )
+        )
+        for t in tournaments
+    ]
 
 
 async def serialize_my_matches(

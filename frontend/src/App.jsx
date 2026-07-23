@@ -6,6 +6,8 @@ import Landing from './pages/Landing'
 import AuthCallback from './pages/AuthCallback'
 import Dashboard from './pages/Dashboard'
 import Tables from './pages/Tables'
+import SpinCounter from './pages/SpinCounter'
+import SpinLobby from './pages/SpinLobby'
 import MatchLobby from './pages/MatchLobby'
 import MatchResult from './pages/MatchResult'
 import Wallet from './pages/Wallet'
@@ -41,6 +43,22 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Tables />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/spincounter"
+        element={
+          <ProtectedRoute>
+            <SpinCounter />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/spincounter/:id"
+        element={
+          <ProtectedRoute>
+            <SpinLobby />
           </ProtectedRoute>
         }
       />

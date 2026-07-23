@@ -9,7 +9,7 @@ from app.config import settings
 from app.database import Base, engine
 from app.middleware.geofencing import GeofencingMiddleware
 from app.redis_client import redis_client
-from app.routers import auth, match, party, users, wallet, webhook
+from app.routers import auth, match, party, tournament, users, wallet, webhook
 from app.services import demo
 
 logging.basicConfig(
@@ -47,6 +47,10 @@ async def lifespan(app: FastAPI):
             await demo.seed_open_tables()
         except Exception:  # noqa: BLE001
             logger.exception("demo seed failed; continuing")
+        try:
+            await demo.seed_open_tournaments()
+        except Exception:  # noqa: BLE001
+            logger.exception("demo SpinCounter seed failed; continuing")
     yield
     try:
         await redis_client.aclose()
@@ -94,6 +98,7 @@ app.include_router(match.router)
 app.include_router(match.public_router)
 app.include_router(match.tables_router)
 app.include_router(party.router)
+app.include_router(tournament.router)
 app.include_router(wallet.router)
 app.include_router(webhook.router)
 

@@ -4,7 +4,14 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models import MatchStatus, PartyLogKind, SplitMode, Team, TransactionType
+from app.models import (
+    MatchStatus,
+    PartyLogKind,
+    SpinStatus,
+    SplitMode,
+    Team,
+    TransactionType,
+)
 
 
 # ─── Auth ───────────────────────────────────────────────────────────────
@@ -143,6 +150,80 @@ class MyMatchOut(BaseModel):
     status: MatchStatus
     result: str | None = None  # 'W' | 'L' | None (unfinished)
     payout: Decimal | None = None
+    created_at: datetime
+    finished_at: datetime | None = None
+
+
+# ─── SpinCounter (1v1 bracket tournaments) ──────────────────────────────
+class WheelSegmentOut(BaseModel):
+    """One segment on the Wheel of Fortune, for drawing the wheel."""
+
+    amount: Decimal
+    weight: int
+
+
+class SpinConfigOut(BaseModel):
+    """What the SpinCounter UI needs to build its create form and wheel."""
+
+    sizes: list[int]  # allowed bracket sizes (powers of two)
+    min_entry: Decimal
+    max_entry: Decimal
+    rounds_best_of: int
+    wheel: list[WheelSegmentOut]
+
+
+class TournamentCreateRequest(BaseModel):
+    entry_fee: Decimal = Field(..., gt=0, description="Buy-in per player")
+    size: int = Field(4, ge=2, le=64, description="Bracket size (power of two)")
+
+
+class TournamentEntryOut(BaseModel):
+    player: PlayerPublic
+    seed: int | None = None
+    eliminated: bool = False
+    is_wheel_winner: bool = False
+    is_champion: bool = False
+
+
+class TournamentGameOut(BaseModel):
+    id: int
+    round: int
+    slot: int
+    player_a: PlayerPublic | None = None
+    player_b: PlayerPublic | None = None
+    winner_id: int | None = None
+    score_a: int = 0
+    score_b: int = 0
+    status: SpinStatus
+
+
+class TournamentOut(BaseModel):
+    id: int
+    creator_id: int
+    size: int
+    entry_fee: Decimal
+    rounds_best_of: int
+    status: SpinStatus
+    prize_pool: Decimal
+    rake_amount: Decimal
+
+    # Wheel of Fortune result — populated once the bracket locks.
+    wheel_prize: Decimal = Decimal("0.00")
+    wheel_segment_index: int | None = None
+    wheel_winner: PlayerPublic | None = None
+
+    champion: PlayerPublic | None = None
+
+    rounds_total: int = 1
+    entries: list[TournamentEntryOut] = []
+    games: list[TournamentGameOut] = []
+
+    # Denormalised for the browse list.
+    entrants: int = 0
+    open_seats: int = 0
+    joined: bool = False
+    creator: PlayerPublic | None = None
+
     created_at: datetime
     finished_at: datetime | None = None
 

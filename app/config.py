@@ -113,6 +113,30 @@ class Settings(BaseSettings):
     # label in the frontend's FORMATS map — no migration.
     allowed_team_sizes: str = "1,2,5"
 
+    # ── SpinCounter (1v1 bracket tournaments with a Wheel of Fortune) ──
+    #
+    # Bracket sizes (players): must be powers of two so the bracket is byeless.
+    # 2 => final only, 4 => semis + final, 8 => quarters + semis + final.
+    spin_sizes: str = "2,4,8"
+    # Buy-in bounds, per player.
+    spin_min_entry: Decimal = Decimal("1.00")
+    spin_max_entry: Decimal = Decimal("500.00")
+    # Rounds each 1v1 is played to (best-of). A player needs (n//2 + 1) wins.
+    spin_rounds_best_of: int = 3
+    # House rake on the tournament prize pool. 0 keeps SpinCounter 100% RTP like
+    # tables — the house is paid on withdrawal, not here.
+    spin_rake_percent: Decimal = Decimal("0")
+
+    # Wheel of Fortune segments: `amount:weight` pairs. When the bracket locks
+    # the wheel draws one segment (weighted) and awards that amount to a random
+    # entrant as a house-funded promotional jackpot — deliberately larger than
+    # the buy-in, which is why it can't come out of the pot. The weights govern
+    # the house's expected promo cost: bigger prizes carry smaller weights.
+    spin_wheel_segments: str = "10:40,20:28,50:18,100:9,250:4,1000:1"
+    # Promo bonuses raise the winner's rollover requirement so they can't be
+    # cashed straight out — the jackpot has to be wagered through first.
+    spin_wheel_rollover: bool = True
+
     # Trusted proxy IPs that can set X-Forwarded-For. Comma-separated.
     # Only these IPs' X-Forwarded-For headers are trusted for geo lookup.
     # In production, set to your load balancer/reverse proxy IP(s).
@@ -150,6 +174,32 @@ class Settings(BaseSettings):
         return sorted(
             {int(s.strip()) for s in self.allowed_team_sizes.split(",") if s.strip()}
         )
+
+    @property
+    def spin_sizes_list(self) -> list[int]:
+        return sorted(
+            {int(s.strip()) for s in self.spin_sizes.split(",") if s.strip()}
+        )
+
+    @property
+    def spin_rake_fraction(self) -> Decimal:
+        return self.spin_rake_percent / Decimal("100")
+
+    @property
+    def spin_wheel_list(self) -> list[tuple[Decimal, int]]:
+        """(amount, weight) pairs parsed from `spin_wheel_segments`.
+
+        Order is preserved so the frontend wheel and the backend draw agree on
+        which segment index maps to which prize.
+        """
+        out: list[tuple[Decimal, int]] = []
+        for pair in self.spin_wheel_segments.split(","):
+            pair = pair.strip()
+            if not pair:
+                continue
+            amount, _, weight = pair.partition(":")
+            out.append((Decimal(amount.strip()), int(weight.strip() or "1")))
+        return out
 
     @property
     def trusted_proxies_set(self) -> set[str]:

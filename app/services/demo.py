@@ -13,8 +13,17 @@ from sqlalchemy import func, select
 
 from app.config import settings
 from app.database import SessionLocal
-from app.models import Match, MatchParticipant, MatchStatus, Team, User
-from app.services import ledger, match_service
+from app.models import (
+    Match,
+    MatchParticipant,
+    MatchStatus,
+    SpinStatus,
+    Team,
+    Tournament,
+    TournamentEntry,
+    User,
+)
+from app.services import ledger, match_service, tournament_service
 
 logger = logging.getLogger("demo")
 
@@ -223,3 +232,182 @@ async def _simulate(match_id: int, delay: float = 6.0) -> None:
         logger.exception("demo simulation failed for table %s", match_id)
     finally:
         _running.discard(match_id)
+
+
+# ─── SpinCounter (tournament) demo ──────────────────────────────────────
+
+# Tournaments whose simulation is already running, kept separate from the table
+# set so ids can overlap without one cancelling the other.
+_running_spins: set[int] = set()
+
+
+def schedule_tournament_simulation(tournament_id: int, delay: float = 6.0) -> None:
+    """Fire-and-forget the demo SpinCounter lifecycle: bots fill the bracket,
+    the wheel spins on lock, then every game auto-plays until a champion."""
+    if not settings.demo_mode or tournament_id in _running_spins:
+        return
+    _running_spins.add(tournament_id)
+    asyncio.create_task(_simulate_tournament(tournament_id, delay))
+
+
+# Sizes/entry fees for the standing SpinCounter tables, so the browse list has
+# a spread of brackets to look at.
+_SEED_SPINS = [(4, "3.00"), (2, "5.00"), (4, "10.00"), (8, "5.00")]
+
+
+async def seed_open_tournaments() -> None:
+    """Keep a handful of open bot SpinCounters around for the lobby to show.
+
+    Same rationale as seed_open_tables: with only one human, a bracket would
+    fill and finish within seconds, so the browse list would always be empty.
+    These sit PENDING (part-filled) until someone takes a seat.
+    """
+    if not settings.demo_mode:
+        return
+    try:
+        async with SessionLocal() as db:
+            existing = (
+                await db.execute(
+                    select(func.count())
+                    .select_from(Tournament)
+                    .where(Tournament.status == SpinStatus.PENDING)
+                )
+            ).scalar_one()
+            if existing >= len(_SEED_SPINS):
+                return
+            missing = _SEED_SPINS[existing:]
+
+        for i, (size, entry) in enumerate(missing):
+            async with SessionLocal() as db:
+                host = await get_or_create_bot(db, 60 + i)
+                locked = await ledger.lock_user(db, host.id)
+                if locked.balance < Decimal("1000.00"):
+                    locked.balance = BOT_BALANCE
+                    await db.commit()
+                host_id = host.id
+            async with SessionLocal() as db:
+                t = await tournament_service.open_tournament(
+                    db, creator_id=host_id, entry_fee=Decimal(entry), size=size
+                )
+                tid = t.id
+            # Part-fill so a bracket doesn't look brand new — leave 2 seats open
+            # so a human still triggers the lock and the wheel.
+            for slot in range(size - 2):
+                async with SessionLocal() as db:
+                    mate = await get_or_create_bot(db, 70 + i * 8 + slot)
+                    locked = await ledger.lock_user(db, mate.id)
+                    if locked.balance < Decimal("1000.00"):
+                        locked.balance = BOT_BALANCE
+                        await db.commit()
+                    mate_id = mate.id
+                async with SessionLocal() as db:
+                    await tournament_service.join_tournament(
+                        db, tournament_id=tid, user_id=mate_id
+                    )
+        logger.info("seeded %d open demo SpinCounters", len(missing))
+    except Exception:  # noqa: BLE001 — seeding must never block startup
+        logger.exception("failed to seed demo SpinCounters")
+
+
+async def _simulate_tournament(tournament_id: int, delay: float = 6.0) -> None:
+    """PENDING -> (bots fill the bracket) LOCK+wheel -> play every game -> champion.
+
+    Bots take whatever seats a real player hasn't. Then games are reported one
+    at a time — the human's bot-free progress is favoured slightly so the demo
+    feels winnable — until the final resolves and the champion is paid.
+    """
+    try:
+        # Let the bracket be visibly waiting first — the lobby polls every 3s.
+        await asyncio.sleep(delay)
+
+        async with SessionLocal() as db:
+            t = (
+                await db.execute(
+                    select(Tournament).where(Tournament.id == tournament_id)
+                )
+            ).scalar_one_or_none()
+            if t is None:
+                return
+            size = t.size
+            entries = (
+                await db.execute(
+                    select(TournamentEntry).where(
+                        TournamentEntry.tournament_id == tournament_id
+                    )
+                )
+            ).scalars().all()
+            status = t.status
+
+        # Fill the remaining seats with bots (only if still filling).
+        if status == SpinStatus.PENDING:
+            need = size - len(entries)
+            for slot in range(need):
+                async with SessionLocal() as db:
+                    bot = await get_or_create_bot(db, 100 + slot)
+                    locked = await ledger.lock_user(db, bot.id)
+                    if locked.balance < Decimal("1000.00"):
+                        locked.balance = BOT_BALANCE
+                        await db.commit()
+                    bot_id = bot.id
+                async with SessionLocal() as db:
+                    await tournament_service.join_tournament(
+                        db, tournament_id=tournament_id, user_id=bot_id
+                    )
+
+        # Identify the human (if any) so the demo can favour them.
+        async with SessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(TournamentEntry.user_id, User.faceit_id)
+                    .join(User, User.id == TournamentEntry.user_id)
+                    .where(TournamentEntry.tournament_id == tournament_id)
+                )
+            ).all()
+            human_ids = {
+                uid for uid, fid in rows if not fid.startswith(BOT_FACEIT_ID)
+            }
+
+        # Play the bracket out, one live game at a time.
+        while True:
+            await asyncio.sleep(5)
+            async with SessionLocal() as db:
+                game = await tournament_service.next_playable_game(db, tournament_id)
+                if game is None:
+                    # Either finished, or the tournament never locked (still
+                    # PENDING because a race left it short) — stop either way.
+                    t = (
+                        await db.execute(
+                            select(Tournament).where(
+                                Tournament.id == tournament_id
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    if t is None or t.status in (
+                        SpinStatus.FINISHED,
+                        SpinStatus.CANCELLED,
+                    ):
+                        break
+                    # Locked but nothing playable yet is transient; loop again.
+                    if t.status == SpinStatus.PENDING:
+                        break
+                    continue
+
+                a, b = game.player_a_id, game.player_b_id
+                # The human's side wins 60% of the time; otherwise coin-flip.
+                if a in human_ids and b not in human_ids:
+                    winner = a if random.random() < 0.60 else b
+                elif b in human_ids and a not in human_ids:
+                    winner = b if random.random() < 0.60 else a
+                else:
+                    winner = random.choice([a, b])
+                await tournament_service.report_game(
+                    db,
+                    tournament_id=tournament_id,
+                    game_id=game.id,
+                    winner_user_id=winner,
+                )
+        logger.info("demo SpinCounter %s played out", tournament_id)
+    except Exception:  # noqa: BLE001 — demo sim must never crash the server
+        logger.exception("demo SpinCounter simulation failed for %s", tournament_id)
+    finally:
+        _running_spins.discard(tournament_id)

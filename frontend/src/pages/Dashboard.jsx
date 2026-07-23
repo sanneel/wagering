@@ -52,6 +52,13 @@ export default function Dashboard() {
             </button>
             <button
               type="button"
+              onClick={() => navigate('/spincounter')}
+              className="rounded-md border border-line-dark px-3 py-2 text-xs font-semibold uppercase tracking-wide text-steel-100 transition-colors hover:border-accent hover:text-accent sm:px-4"
+            >
+              Spin
+            </button>
+            <button
+              type="button"
               onClick={() => navigate('/tables')}
               className="rounded-md bg-accent px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white transition-colors hover:bg-accent-dark sm:px-4"
             >
