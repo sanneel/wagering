@@ -16,7 +16,7 @@ from app.schemas import (
     TournamentCreateRequest,
     TournamentOut,
 )
-from app.security import get_current_user
+from app.security import get_active_user, get_current_user
 from app.serializers import serialize_tournament, serialize_tournaments
 from app.services import demo, ledger, tournament_service
 
@@ -58,7 +58,7 @@ async def list_tournaments(
 @router.post("", response_model=TournamentOut, status_code=201)
 async def create_tournament(
     body: TournamentCreateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> TournamentOut:
     """Open a SpinCounter and take the first bracket seat."""
@@ -82,7 +82,7 @@ async def create_tournament(
 @router.post("/{tournament_id}/join", response_model=TournamentOut)
 async def join_tournament(
     tournament_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> TournamentOut:
     """Take a bracket seat. Locks + spins the wheel when the last seat fills."""

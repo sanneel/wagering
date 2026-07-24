@@ -7,6 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import func
+
 from app.config import settings
 from app.database import get_db
 from app.models import Transaction, TransactionType, User
@@ -19,7 +23,39 @@ from app.schemas import (
     WithdrawResponse,
 )
 from app.security import get_current_user
-from app.services import ledger, payed
+from app.services import bonus, ledger, payed
+
+
+async def _assert_can_deposit(db: AsyncSession, user: User, amount: Decimal) -> None:
+    """Responsible-gaming gate on new deposits."""
+    now = datetime.now(timezone.utc)
+    excluded = user.self_excluded_until
+    if excluded is not None:
+        if excluded.tzinfo is None:
+            excluded = excluded.replace(tzinfo=timezone.utc)
+        if excluded > now:
+            raise HTTPException(
+                status_code=403,
+                detail=f"self-excluded until {excluded.date().isoformat()}",
+            )
+    if user.daily_deposit_limit is not None:
+        since = now - timedelta(hours=24)
+        spent = (
+            await db.execute(
+                select(func.coalesce(func.sum(Transaction.amount), 0)).where(
+                    Transaction.user_id == user.id,
+                    Transaction.type == TransactionType.DEPOSIT,
+                    Transaction.created_at >= since,
+                )
+            )
+        ).scalar_one()
+        if ledger.quantize(Decimal(spent) + amount) > user.daily_deposit_limit:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"exceeds your ${user.daily_deposit_limit} daily deposit limit"
+                ),
+            )
 
 logger = logging.getLogger("wallet")
 router = APIRouter(prefix="/wallet", tags=["wallet"])
@@ -42,6 +78,7 @@ async def deposit(
         raise HTTPException(
             status_code=400, detail=f"minimum deposit is {settings.min_deposit}"
         )
+    await _assert_can_deposit(db, current_user, amount)
 
     reference = f"dep-{current_user.id}-{uuid.uuid4().hex[:12]}"
 
@@ -59,6 +96,8 @@ async def deposit(
         # and the amount that must be wagered through before it can leave.
         ledger.add_principal(user, amount)
         ledger.raise_rollover(user, amount * settings.rollover_multiplier)
+        # First deposit earns the welcome bonus (BONUS credit + its own rollover).
+        welcome = await bonus.grant_welcome(db, user, amount)
         await db.commit()
         await db.refresh(tx)
         return DepositResponse(
@@ -66,6 +105,7 @@ async def deposit(
             payment_ref=reference,
             checkout_url="",  # no redirect in demo; frontend refreshes balance
             amount=amount,
+            bonus_granted=welcome,
         )
 
     try:

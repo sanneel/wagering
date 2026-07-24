@@ -11,7 +11,7 @@ from app.config import settings
 from app.database import get_db
 from app.models import Transaction, TransactionType
 from app.redis_client import mark_webhook_seen, resolve_faceit_match
-from app.services import ledger, match_service, payed, tournament_service
+from app.services import bonus, ledger, match_service, payed, tournament_service
 
 logger = logging.getLogger("webhook")
 router = APIRouter(prefix="/webhook", tags=["webhook"])
@@ -209,6 +209,8 @@ async def payed_webhook(
     # the wagering requirement are raised here — not when checkout was started.
     ledger.add_principal(user, tx.amount)
     ledger.raise_rollover(user, tx.amount * settings.rollover_multiplier)
+    # First real deposit earns the welcome bonus.
+    await bonus.grant_welcome(db, user, tx.amount)
     await db.commit()
 
     logger.info("credited deposit %s to user %s", payment_ref, tx.user_id)

@@ -21,6 +21,12 @@ export default function Wallet() {
   const [txns, setTxns] = useState([])
   const [txnsLoaded, setTxnsLoaded] = useState(false)
 
+  const [rewards, setRewards] = useState(null)
+  const [claiming, setClaiming] = useState(false)
+  const [limitInput, setLimitInput] = useState('')
+  const [rgBusy, setRgBusy] = useState('')
+  const [rgNotice, setRgNotice] = useState('')
+
   // Live quote for the amount in the withdraw box, so the fee and the
   // rollover gate are visible before the user commits.
   const [quote, setQuote] = useState(null)
@@ -57,9 +63,65 @@ export default function Wallet() {
     }
   }
 
+  async function loadRewards() {
+    try {
+      const { data } = await client.get('/me/rewards')
+      setRewards(data)
+    } catch {
+      setRewards(null)
+    }
+  }
+
   useEffect(() => {
     loadTxns()
+    loadRewards()
   }, [])
+
+  async function claimDaily() {
+    setClaiming(true)
+    setNotice('')
+    try {
+      const { data } = await client.post('/me/rewards/daily')
+      setNotice(`Daily reward claimed: ${money(data.granted)}.`)
+      await Promise.all([fetchMe(), loadRewards(), loadTxns()])
+    } catch (err) {
+      setNotice(errMsg(err, 'Could not claim the daily reward.'))
+    } finally {
+      setClaiming(false)
+    }
+  }
+
+  async function saveLimit() {
+    setRgBusy('limit')
+    setRgNotice('')
+    try {
+      const value = limitInput.trim() === '' ? null : parseFloat(limitInput)
+      await client.put('/me/limits', { daily_deposit_limit: value })
+      await fetchMe()
+      setRgNotice(value == null ? 'Daily deposit limit removed.' : `Daily deposit limit set to ${money(value)}.`)
+    } catch (err) {
+      setRgNotice(errMsg(err, 'Could not update your limit.'))
+    } finally {
+      setRgBusy('')
+    }
+  }
+
+  async function selfExclude(days) {
+    if (!window.confirm(`Lock your account out of deposits and wagering for ${days} days? This cannot be undone.`)) {
+      return
+    }
+    setRgBusy('exclude')
+    setRgNotice('')
+    try {
+      await client.post('/me/self-exclude', { days })
+      await fetchMe()
+      setRgNotice(`You are self-excluded for ${days} days. You can still withdraw your balance.`)
+    } catch (err) {
+      setRgNotice(errMsg(err, 'Could not set self-exclusion.'))
+    } finally {
+      setRgBusy('')
+    }
+  }
 
   async function deposit() {
     setDepositErr('')
@@ -76,9 +138,13 @@ export default function Wallet() {
         window.location.href = data.checkout_url
         return
       }
-      setNotice('Deposit initiated.')
+      setNotice(
+        parseFloat(data?.bonus_granted ?? 0) > 0
+          ? `Deposit complete — plus a ${money(data.bonus_granted)} welcome bonus!`
+          : 'Deposit complete.'
+      )
       setDepositAmt('')
-      await Promise.all([fetchMe(), loadTxns()])
+      await Promise.all([fetchMe(), loadTxns(), loadRewards()])
     } catch (err) {
       setDepositErr(errMsg(err, 'Deposit failed.'))
     } finally {
@@ -152,6 +218,30 @@ export default function Wallet() {
               Deposits unlock for withdrawal once played into a match. Burns
               down every time a match you&apos;re in settles.
             </p>
+          </div>
+        )}
+
+        {/* Daily reward. Only shown when the reward feature is on. */}
+        {rewards && parseFloat(rewards.daily_amount) > 0 && (
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line-dark bg-graphite-900 p-4">
+            <div>
+              <div className="text-sm font-medium text-white">
+                Daily reward · {money(rewards.daily_amount)}
+              </div>
+              <p className="mt-0.5 text-xs text-steel-500">
+                {rewards.daily_available
+                  ? 'Claim a small bonus every day you play.'
+                  : `Next reward ${formatDate(rewards.daily_next_at)}. Come back tomorrow.`}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={claimDaily}
+              disabled={claiming || !rewards.daily_available}
+              className="rounded-md bg-accent px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {claiming ? 'Claiming…' : rewards.daily_available ? 'Claim' : 'Claimed'}
+            </button>
           </div>
         )}
 
@@ -307,6 +397,75 @@ export default function Wallet() {
               </table>
             </>
           )}
+        </section>
+
+        {/* Responsible gaming. Self-set a deposit cap, or take a break. */}
+        <section className="mt-12">
+          <h2 className="text-[10px] font-medium uppercase tracking-[0.28em] text-steel-500">
+            Responsible gaming
+          </h2>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <div className="rounded-xl border border-line-dark bg-graphite-900 p-5">
+              <div className="text-sm font-medium text-white">Daily deposit limit</div>
+              <p className="mt-1 text-xs text-steel-500">
+                {user?.daily_deposit_limit != null
+                  ? `Currently ${money(user.daily_deposit_limit)} per 24h.`
+                  : 'No limit set. Cap how much you can deposit in a day.'}
+              </p>
+              <div className="mt-3 flex items-center gap-2">
+                <div className="flex flex-1 items-center rounded-md border border-line-dark bg-graphite-800 px-3">
+                  <span className="text-sm text-steel-500">$</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={limitInput}
+                    placeholder="Amount (blank = none)"
+                    onChange={(e) => setLimitInput(e.target.value)}
+                    className="w-full bg-transparent px-2 py-2 text-sm text-white outline-none placeholder:text-steel-500"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={saveLimit}
+                  disabled={rgBusy === 'limit'}
+                  className="rounded-md border border-line-dark px-4 py-2 text-sm font-medium text-steel-100 transition-colors hover:border-accent hover:text-accent disabled:opacity-40"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-line-dark bg-graphite-900 p-5">
+              <div className="text-sm font-medium text-white">Take a break</div>
+              <p className="mt-1 text-xs text-steel-500">
+                {user?.self_excluded_until
+                  ? `Self-excluded until ${formatDate(user.self_excluded_until)}. You can still withdraw.`
+                  : 'Lock yourself out of deposits and wagering. Withdrawals stay open.'}
+              </p>
+              {!user?.self_excluded_until && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {[7, 30, 90].map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => selfExclude(d)}
+                      disabled={rgBusy === 'exclude'}
+                      className="rounded-md border border-line-dark px-4 py-2 text-sm font-medium text-steel-100 transition-colors hover:border-loss hover:text-loss disabled:opacity-40"
+                    >
+                      {d} days
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          {rgNotice && <p className="mt-3 text-sm text-accent">{rgNotice}</p>}
+          <p className="mt-4 text-xs leading-relaxed text-steel-600">
+            Must be 18+ (or the legal age where you live) to play. Wagering
+            involves risk; only stake what you can afford to lose. If gambling
+            stops being fun, take a break or seek help.
+          </p>
         </section>
       </main>
     </div>

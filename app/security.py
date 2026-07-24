@@ -63,3 +63,23 @@ async def get_current_user(
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unknown user")
     return user
+
+
+async def get_active_user(user: User = Depends(get_current_user)) -> User:
+    """A current user who is not self-excluded — the gate for wagering actions.
+
+    Self-excluded players can still sign in, view, and withdraw; they just can't
+    stake money until the exclusion lifts.
+    """
+    from datetime import datetime, timezone
+
+    excluded = user.self_excluded_until
+    if excluded is not None:
+        if excluded.tzinfo is None:
+            excluded = excluded.replace(tzinfo=timezone.utc)
+        if excluded > datetime.now(timezone.utc):
+            raise HTTPException(
+                status_code=403,
+                detail=f"self-excluded until {excluded.date().isoformat()}",
+            )
+    return user

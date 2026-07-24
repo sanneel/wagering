@@ -24,5 +24,6 @@ run() {
 run test_scenarios.py           test_scen.db  DEMO_MODE=true
 run test_faceit_integration.py  test_fac.db   DEMO_MODE=false
 run test_webhook.py             test_wh.db    DEMO_MODE=false FACEIT_WEBHOOK_SECRET=whsec
+run test_bonus_rg.py            test_br.db    DEMO_MODE=true
 
 exit $fail

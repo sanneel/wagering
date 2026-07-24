@@ -145,6 +145,23 @@ class Settings(BaseSettings):
     # straight out — the jackpot has to be wagered through first.
     spin_wheel_rollover: bool = True
 
+    # ── Retention bonuses (see docs/PLATFORM_ECONOMICS.md) ──
+    # Every bonus carries rollover so it can't be cashed straight out — that is
+    # what keeps its net cost below face value and blocks bonus-farming.
+    welcome_bonus_enabled: bool = True
+    welcome_bonus_percent: Decimal = Decimal("50")     # of the first deposit
+    welcome_bonus_max: Decimal = Decimal("10.00")      # hard cap
+    welcome_bonus_rollover: Decimal = Decimal("3")     # wager the bonus 3x
+    daily_bonus_enabled: bool = True
+    daily_bonus_amount: Decimal = Decimal("0.50")
+    daily_bonus_rollover: Decimal = Decimal("1")
+    daily_bonus_cooldown_hours: int = 24
+
+    # ── Responsible gaming ──
+    # A player may self-set a lower daily deposit cap; this is the ceiling on
+    # what they can raise it to. Self-exclusion is always available to them.
+    max_daily_deposit_limit: Decimal = Decimal("2000.00")
+
     # Trusted proxy IPs that can set X-Forwarded-For. Comma-separated.
     # Only these IPs' X-Forwarded-For headers are trusted for geo lookup.
     # In production, set to your load balancer/reverse proxy IP(s).

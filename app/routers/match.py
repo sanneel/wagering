@@ -18,7 +18,7 @@ from app.schemas import (
     TableJoinRequest,
     TableOut,
 )
-from app.security import get_current_user
+from app.security import get_active_user, get_current_user
 from app.serializers import serialize_match, serialize_recent, serialize_tables
 from app.services import demo, ledger, match_service
 
@@ -72,7 +72,7 @@ async def list_tables(
 @tables_router.post("", response_model=MatchOut, status_code=201)
 async def create_table(
     body: TableCreateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> MatchOut:
     """Open a table and take the first seat."""
@@ -97,7 +97,7 @@ async def create_table(
 async def join_table(
     match_id: int,
     body: TableJoinRequest | None = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> MatchOut:
     """Take a seat. Locks the table once the last seat is filled."""

@@ -97,6 +97,21 @@ class User(Base):
 
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Retention: the first-deposit welcome bonus is one-time; the daily reward is
+    # gated by a cooldown from the last claim.
+    welcome_bonus_claimed: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_daily_bonus_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Responsible gaming: a self-set deposit cap (per rolling 24h) and a
+    # self-exclusion lock that blocks deposits and wagering until it lifts.
+    daily_deposit_limit: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    self_excluded_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

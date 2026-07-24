@@ -48,7 +48,34 @@ class UserOut(BaseModel):
     principal: Decimal = Decimal("0.00")
     is_verified: bool
     is_demo: bool = False
+    # Responsible gaming.
+    daily_deposit_limit: Decimal | None = None
+    self_excluded_until: datetime | None = None
     created_at: datetime
+
+
+class RewardsOut(BaseModel):
+    """Daily-reward availability and welcome-bonus state for the wallet UI."""
+
+    daily_available: bool
+    daily_amount: Decimal
+    daily_next_at: datetime | None = None
+    welcome_claimed: bool
+
+
+class DailyClaimResponse(BaseModel):
+    granted: Decimal
+    balance: Decimal
+    next_at: datetime | None = None
+
+
+class SetLimitRequest(BaseModel):
+    # None clears the limit; otherwise capped server-side at max_daily_deposit_limit.
+    daily_deposit_limit: Decimal | None = Field(default=None, ge=0)
+
+
+class SelfExcludeRequest(BaseModel):
+    days: int = Field(..., ge=1, le=3650)
 
 
 class PlayerPublic(BaseModel):
@@ -306,6 +333,9 @@ class DepositResponse(BaseModel):
     payment_ref: str
     checkout_url: str
     amount: Decimal
+    # Welcome bonus granted alongside a first deposit (0 otherwise). In the real
+    # provider flow the bonus lands with the webhook credit, not here.
+    bonus_granted: Decimal = Decimal("0.00")
 
 
 class WithdrawRequest(BaseModel):
