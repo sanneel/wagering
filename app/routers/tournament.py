@@ -15,7 +15,6 @@ from app.schemas import (
     SpinConfigOut,
     TournamentCreateRequest,
     TournamentOut,
-    WheelSegmentOut,
 )
 from app.security import get_current_user
 from app.serializers import serialize_tournament, serialize_tournaments
@@ -26,16 +25,14 @@ router = APIRouter(prefix="/spincounter", tags=["spincounter"])
 
 @router.get("/config", response_model=SpinConfigOut)
 async def spin_config() -> SpinConfigOut:
-    """Bracket sizes, entry bounds and the wheel — drives the UI. Public."""
+    """Bracket sizes, entry bounds and jackpot shape — drives the UI. Public."""
     return SpinConfigOut(
         sizes=settings.spin_sizes_list,
         min_entry=settings.spin_min_entry,
         max_entry=settings.spin_max_entry,
         rounds_best_of=settings.spin_rounds_best_of,
-        wheel=[
-            WheelSegmentOut(amount=amount, weight=weight)
-            for amount, weight in settings.spin_wheel_list
-        ],
+        jackpot_rake_percent=settings.spin_jackpot_rake_percent,
+        jackpot_max_multiplier=settings.spin_jackpot_max_multiplier,
     )
 
 

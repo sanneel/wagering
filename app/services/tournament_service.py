@@ -302,35 +302,39 @@ async def cancel_and_refund(
 # ─── lock: wheel + bracket ──────────────────────────────────────────────
 
 
-def _spin_wheel() -> tuple[Decimal, int]:
-    """Draw a weighted-random wheel segment. Returns (prize_amount, index)."""
-    segments = settings.spin_wheel_list
-    if not segments:
-        return Decimal("0.00"), -1
-    weights = [w for _, w in segments]
-    index = random.choices(range(len(segments)), weights=weights, k=1)[0]
-    return ledger.quantize(segments[index][0]), index
+def _draw_jackpot_multiplier() -> tuple[Decimal, int]:
+    """Draw a weighted-random jackpot multiplier. Returns (multiplier, index)."""
+    mults = settings.spin_jackpot_multiplier_list
+    if not mults:
+        return Decimal("0"), -1
+    weights = [w for _, w in mults]
+    index = random.choices(range(len(mults)), weights=weights, k=1)[0]
+    return mults[index][0], index
 
 
 async def _lock_and_start(db: AsyncSession, t: Tournament) -> None:
-    """Fix the pool, spin the wheel, draw seeds, create round-1 games.
+    """Fix the pool, draw the jackpot, draw seeds, create round-1 games.
 
     Runs inside the caller's open transaction (the final join), so the whole
     lock is atomic with the last escrow: a bracket never half-locks.
     """
     pool = ledger.quantize(t.entry_fee * t.size)
-    t.rake_amount = ledger.quantize(pool * settings.spin_rake_fraction)
-    t.prize_pool = ledger.quantize(pool - t.rake_amount)
+    house_rake = ledger.quantize(pool * settings.spin_rake_fraction)
+    # A share of the pool funds the jackpot; the champion takes the remainder.
+    jackpot_budget = ledger.quantize(pool * settings.spin_jackpot_rake_fraction)
+    t.rake_amount = house_rake
+    t.prize_pool = ledger.quantize(pool - house_rake - jackpot_budget)
 
     entries = await _entries(db, t.id)
 
-    # ── Wheel of Fortune ──
-    # House-funded promotional jackpot: a weighted-random segment picks the
-    # amount, a random entrant wins it. It does NOT come from the pool (that is
-    # why it can dwarf the buy-in) — in production its expected cost is a
-    # marketing budget the segment weights tune. Credited as BONUS, raising the
-    # winner's rollover so it can't be instantly withdrawn.
-    prize, index = _spin_wheel()
+    # ── Jackpot ──
+    # Self-funding: the jackpot budget is skimmed from the entry pool (above) and
+    # paid to one random entrant, scaled by a multiplier whose expected value is
+    # ~1. So the jackpot is player-funded on average — no runaway house cost —
+    # while a rare high multiplier still pays well over the buy-in. Credited as
+    # BONUS, raising the winner's rollover so it can't be instantly withdrawn.
+    mult, index = _draw_jackpot_multiplier()
+    prize = ledger.quantize(jackpot_budget * mult)
     winner_entry = random.choice(entries)
     t.wheel_prize = prize
     t.wheel_segment_index = index

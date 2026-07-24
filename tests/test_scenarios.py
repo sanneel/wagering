@@ -132,11 +132,14 @@ async def scenario_happy_4():
     for uid in ids[1:]:
         await join_t(tid, uid)
 
+    # Pool ($12) minus the jackpot rake (15% = $1.80) is the champion's take.
+    jackpot_budget = (Decimal("12.00") * Decimal("0.15")).quantize(Decimal("0.01"))
+    champ_pool = (Decimal("12.00") - jackpot_budget).quantize(Decimal("0.01"))
     t = await tget(tid)
     check("locked when full", t.status == SpinStatus.LOCKED)
-    check("prize pool = 4*3 = 12", t.prize_pool == Decimal("12.00"))
+    check("champion pool = 12 - jackpot rake", t.prize_pool == champ_pool)
     check("wheel winner assigned", t.wheel_winner_id in ids)
-    check("wheel prize > 0", t.wheel_prize > 0)
+    check("jackpot within budget x max multiplier", Decimal("0") <= t.wheel_prize <= jackpot_budget * 8)
 
     games = await games_of(tid)
     check("4-player bracket has 3 games (2 semi + 1 final)", len(games) == 3)
@@ -146,20 +149,23 @@ async def scenario_happy_4():
     check("final has no players yet", finals[0].player_a_id is None and finals[0].player_b_id is None)
 
     wheel_winner = t.wheel_winner_id
-    wheel_prize = t.wheel_prize
+    jackpot = t.wheel_prize
 
     await play_to_champion(tid)
     t = await tget(tid)
     check("tournament FINISHED", t.status == SpinStatus.FINISHED)
     check("champion set", t.champion_id in ids)
 
+    # Players collectively net (champion pool + jackpot - entries); the balance
+    # is the house's share of the jackpot budget (>=0 unless a big multiplier hit).
     end_total = await total_balance(ids)
-    expected = start_total - Decimal("12.00") + Decimal("12.00") + wheel_prize
-    check(f"money conserved (pool RTP + house wheel {wheel_prize})", end_total == expected)
+    player_net = end_total - start_total
+    check("player net = champ pool + jackpot - entries",
+          player_net == (champ_pool + jackpot - Decimal("12.00")).quantize(Decimal("0.01")))
 
-    expected_champ = Decimal("100.00") - Decimal("3.00") + Decimal("12.00")
+    expected_champ = Decimal("100.00") - Decimal("3.00") + champ_pool
     if t.champion_id == wheel_winner:
-        expected_champ += wheel_prize
+        expected_champ += jackpot
     check("champion balance exact", await bal(t.champion_id) == expected_champ)
 
 
@@ -175,7 +181,8 @@ async def scenario_size2():
     await play_to_champion(tid)
     t = await tget(tid)
     check("size-2 finishes", t.status == SpinStatus.FINISHED)
-    check("size-2 prize pool = 10", t.prize_pool == Decimal("10.00"))
+    # $10 pool minus 15% jackpot rake = $8.50 to the champion.
+    check("size-2 champion pool = 8.50", t.prize_pool == Decimal("8.50"))
 
 
 async def scenario_size8():
@@ -195,7 +202,8 @@ async def scenario_size8():
     await play_to_champion(tid)
     t = await tget(tid)
     check("8-player finishes with champion", t.status == SpinStatus.FINISHED and t.champion_id is not None)
-    check("8-player prize pool = 40", t.prize_pool == Decimal("40.00"))
+    # $40 pool minus 15% jackpot rake = $34 to the champion.
+    check("8-player champion pool = 34", t.prize_pool == Decimal("34.00"))
 
 
 async def expect_error(coro, exc, label):
@@ -350,12 +358,17 @@ async def scenario_rollover():
 
 
 async def scenario_bonus_ledger():
-    print("\n[Scenario] Wheel bonus writes exactly one BONUS transaction")
-    ids = [await mkuser(f"bl_{i}") for i in range(4)]
-    tid = await open_t(ids[0], "3.00", 4)
-    for uid in ids[1:]:
-        await join_t(tid, uid)
-    t = await tget(tid)
+    print("\n[Scenario] Jackpot writes a matching BONUS transaction (or none if 0)")
+    # Open a few until we hit a non-zero jackpot, so the BONUS-row path is
+    # exercised deterministically (the multiplier can land on 0).
+    for _ in range(20):
+        ids = [await mkuser(f"bl_{_}_{i}") for i in range(4)]
+        tid = await open_t(ids[0], "3.00", 4)
+        for uid in ids[1:]:
+            await join_t(tid, uid)
+        t = await tget(tid)
+        if t.wheel_prize > 0:
+            break
     async with SessionLocal() as db:
         rows = (await db.execute(
             select(Transaction).where(
@@ -363,8 +376,11 @@ async def scenario_bonus_ledger():
                 Transaction.type == TransactionType.BONUS,
             )
         )).scalars().all()
-    check("exactly one BONUS tx for wheel winner",
-          len(rows) == 1 and rows[0].amount == t.wheel_prize)
+    if t.wheel_prize > 0:
+        check("exactly one BONUS tx matching the jackpot",
+              len(rows) == 1 and rows[0].amount == t.wheel_prize)
+    else:
+        check("no BONUS tx when the jackpot is zero", len(rows) == 0)
 
 
 async def main():

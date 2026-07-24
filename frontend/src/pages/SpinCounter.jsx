@@ -105,8 +105,8 @@ export default function SpinCounter() {
 
   const balance = parseFloat(user?.balance ?? 0)
   const sizes = config?.sizes ?? [4, 8]
-  const wheel = config?.wheel ?? []
-  const topPrize = wheel.reduce((m, s) => Math.max(m, parseFloat(s.amount)), 0)
+  const jackpotRake = parseFloat(config?.jackpot_rake_percent ?? 15)
+  const maxMult = parseFloat(config?.jackpot_max_multiplier ?? 5)
 
   return (
     <div className="min-h-screen bg-graphite-950 text-steel-100">
@@ -156,16 +156,15 @@ export default function SpinCounter() {
               one buy-in.
             </p>
             <p className="mt-5 text-xs text-steel-500">
-              Jackpot up to{' '}
-              <span className="text-steel-300">{money(topPrize)}</span> · Best of{' '}
-              <span className="text-steel-300">{config?.rounds_best_of ?? 3}</span>{' '}
-              · Winner takes the pool
+              Champion takes the pool · jackpot on top up to{' '}
+              <span className="text-steel-300">{maxMult}×</span> its share · Best of{' '}
+              <span className="text-steel-300">{config?.rounds_best_of ?? 3}</span>
             </p>
           </div>
           <div className="w-full max-w-[20rem] justify-self-center rounded-xl bg-graphite-900 p-6">
             <PrizeCounter idle slots={4} />
             <p className="mt-4 text-center text-xs text-steel-500">
-              Lands on a jackpot up to {money(topPrize)}
+              One random entrant catches the jackpot
             </p>
           </div>
         </div>
@@ -264,7 +263,8 @@ export default function SpinCounter() {
                 size={openSize}
                 fee={fee}
                 balance={balance}
-                topPrize={topPrize}
+                jackpotRake={jackpotRake}
+                maxMult={maxMult}
                 busy={creating}
                 onOpen={openTournament}
               />
@@ -347,9 +347,11 @@ function Chip({ on, onClick, children }) {
   )
 }
 
-function Summary({ size, fee, balance, topPrize, busy, onOpen }) {
+function Summary({ size, fee, balance, jackpotRake, maxMult, busy, onOpen }) {
   const valid = Number.isFinite(fee) && fee > 0
   const pool = valid ? fee * size : 0
+  const championTake = valid ? pool * (1 - jackpotRake / 100) : 0
+  const maxJackpot = valid ? pool * (jackpotRake / 100) * maxMult : 0
   const short = valid && fee > balance
 
   return (
@@ -364,18 +366,18 @@ function Summary({ size, fee, balance, topPrize, busy, onOpen }) {
       <dl className="mt-5 space-y-2 border-t border-line-dark pt-4 text-sm">
         <Line k="Bracket" v={`${size} players`} />
         <Line k="Prize pool" v={valid ? money(pool) : '-'} />
-        <Line k="Rake" v="0%" />
+        <Line k="Jackpot share" v={`${jackpotRake}%`} />
       </dl>
 
       <div className="mt-5 border-t border-line-dark pt-4">
         <div className="flex items-baseline justify-between gap-3">
           <span className="text-sm text-steel-400">Champion takes</span>
           <span className="font-display text-xl font-semibold text-white">
-            {valid ? money(pool) : '-'}
+            {valid ? money(championTake) : '-'}
           </span>
         </div>
         <p className="mt-1 text-xs leading-relaxed text-steel-500">
-          Plus a jackpot up to {money(topPrize)} for one lucky entrant.
+          Plus a jackpot for one random entrant — up to {money(maxJackpot)}.
         </p>
       </div>
 

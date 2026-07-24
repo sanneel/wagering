@@ -107,8 +107,9 @@ async def main():
         champ = tt.champion_id
         winner_bal = (await db.execute(select(User.balance).where(User.id == a_id))).scalar_one()
     check("champion is faction1 player", champ == a_id)
-    # a: 100 - 5 entry + 10 pool = 105 (plus wheel if a won it; wheel may add more)
-    check("winner balance >= 105 (pool paid)", winner_bal >= Decimal("105.00"))
+    # a: 100 - 5 entry + 8.50 champion pool ($10 less the 15% jackpot rake) =
+    # 103.50, plus the jackpot if a also caught it.
+    check("winner balance >= 103.50 (champion pool paid)", winner_bal >= Decimal("103.50"))
 
     print(f"\n=== {PASS} passed, {FAIL} failed ===")
     await engine.dispose()

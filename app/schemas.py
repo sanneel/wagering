@@ -175,21 +175,17 @@ class MyTournamentOut(BaseModel):
 
 
 # ─── SpinCounter (1v1 bracket tournaments) ──────────────────────────────
-class WheelSegmentOut(BaseModel):
-    """One segment on the Wheel of Fortune, for drawing the wheel."""
-
-    amount: Decimal
-    weight: int
-
-
 class SpinConfigOut(BaseModel):
-    """What the SpinCounter UI needs to build its create form and wheel."""
+    """What the SpinCounter UI needs to build its create form."""
 
     sizes: list[int]  # allowed bracket sizes (powers of two)
     min_entry: Decimal
     max_entry: Decimal
     rounds_best_of: int
-    wheel: list[WheelSegmentOut]
+    # Share of the entry pool that funds the jackpot (the champion takes the
+    # rest), and the rare top multiplier applied to that budget.
+    jackpot_rake_percent: Decimal
+    jackpot_max_multiplier: Decimal
 
 
 class TournamentCreateRequest(BaseModel):

@@ -126,18 +126,23 @@ class Settings(BaseSettings):
     spin_max_entry: Decimal = Decimal("500.00")
     # Rounds each 1v1 is played to (best-of). A player needs (n//2 + 1) wins.
     spin_rounds_best_of: int = 3
-    # House rake on the tournament prize pool. 0 keeps SpinCounter 100% RTP like
-    # tables — the house is paid on withdrawal, not here.
+    # House rake on the tournament prize pool. 0 keeps the champion's cut at 100%
+    # of what's left after the jackpot rake below; the house earns on withdrawal.
     spin_rake_percent: Decimal = Decimal("0")
 
-    # Wheel of Fortune segments: `amount:weight` pairs. When the bracket locks
-    # the wheel draws one segment (weighted) and awards that amount to a random
-    # entrant as a house-funded promotional jackpot — deliberately larger than
-    # the buy-in, which is why it can't come out of the pot. The weights govern
-    # the house's expected promo cost: bigger prizes carry smaller weights.
-    spin_wheel_segments: str = "10:40,20:28,50:18,100:9,250:4,1000:1"
-    # Promo bonuses raise the winner's rollover requirement so they can't be
-    # cashed straight out — the jackpot has to be wagered through first.
+    # Jackpot economics (self-funding — see docs/PLATFORM_ECONOMICS.md).
+    #
+    # A share of every bracket's entry pool is skimmed into the jackpot budget;
+    # the champion takes the rest. That budget is paid to one random entrant,
+    # scaled by a multiplier drawn from `spin_jackpot_multipliers` (`mult:weight`
+    # pairs). Because the multiplier's expected value is ~1, the jackpot is
+    # player-funded on average — no runaway house cost — while a rare high
+    # multiplier still pays out well above the buy-in. (The old fixed-dollar
+    # wheel had an expected payout of ~$47 on a $12 pool: an instant loss.)
+    spin_jackpot_rake_percent: Decimal = Decimal("15")
+    spin_jackpot_multipliers: str = "0:18,0.5:40,1:28,2:11,8:3"
+    # Jackpot winnings raise the winner's rollover so they can't be cashed
+    # straight out — the jackpot has to be wagered through first.
     spin_wheel_rollover: bool = True
 
     # Trusted proxy IPs that can set X-Forwarded-For. Comma-separated.
@@ -189,20 +194,28 @@ class Settings(BaseSettings):
         return self.spin_rake_percent / Decimal("100")
 
     @property
-    def spin_wheel_list(self) -> list[tuple[Decimal, int]]:
-        """(amount, weight) pairs parsed from `spin_wheel_segments`.
+    def spin_jackpot_rake_fraction(self) -> Decimal:
+        return self.spin_jackpot_rake_percent / Decimal("100")
 
-        Order is preserved so the frontend wheel and the backend draw agree on
-        which segment index maps to which prize.
+    @property
+    def spin_jackpot_multiplier_list(self) -> list[tuple[Decimal, int]]:
+        """(multiplier, weight) pairs parsed from `spin_jackpot_multipliers`.
+
+        Order is preserved so a stored segment index maps back to a multiplier.
         """
         out: list[tuple[Decimal, int]] = []
-        for pair in self.spin_wheel_segments.split(","):
+        for pair in self.spin_jackpot_multipliers.split(","):
             pair = pair.strip()
             if not pair:
                 continue
-            amount, _, weight = pair.partition(":")
-            out.append((Decimal(amount.strip()), int(weight.strip() or "1")))
+            mult, _, weight = pair.partition(":")
+            out.append((Decimal(mult.strip()), int(weight.strip() or "1")))
         return out
+
+    @property
+    def spin_jackpot_max_multiplier(self) -> Decimal:
+        mults = self.spin_jackpot_multiplier_list
+        return max((m for m, _ in mults), default=Decimal("0"))
 
     @property
     def trusted_proxies_set(self) -> set[str]:
