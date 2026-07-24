@@ -24,9 +24,11 @@ from app.models import (
     User,
 )
 from app.services import party_service, tournament_service
+from app.models import SpinStatus
 from app.schemas import (
     MatchOut,
     MyMatchOut,
+    MyTournamentOut,
     PlayerPublic,
     RecentMatchOut,
     SeatOut,
@@ -310,6 +312,97 @@ async def serialize_tournaments(
         )
         for t in tournaments
     ]
+
+
+def _round_label(round_no: int, total: int) -> str:
+    """Human name for a bracket round — mirrors the frontend's labels."""
+    from_end = total - round_no
+    if from_end == 0:
+        return "Final"
+    if from_end == 1:
+        return "Semifinal"
+    if from_end == 2:
+        return "Quarterfinal"
+    return f"Round {round_no}"
+
+
+async def serialize_my_tournaments(
+    db: AsyncSession, tournaments: list[Tournament], me_id: int
+) -> list[MyTournamentOut]:
+    """The current user's SpinCounter history, framed from their side.
+
+    Net is the whole-tournament result: pool won plus jackpot won, less the
+    entry — the same "what actually hit my balance" framing the match history
+    uses, so a champion who also caught the jackpot shows both.
+    """
+    ids = [t.id for t in tournaments]
+    games_by = await _tournament_games(db, ids)
+    champ_ids = {t.champion_id for t in tournaments if t.champion_id}
+    users = await _load_users(db, champ_ids)
+
+    out: list[MyTournamentOut] = []
+    for t in tournaments:
+        games = games_by.get(t.id, [])
+        rounds_total = tournament_service._rounds_for(t.size)
+        is_champ = t.champion_id == me_id
+        won_jackpot = t.wheel_winner_id == me_id
+        jackpot = t.wheel_prize if won_jackpot else Decimal("0.00")
+
+        placement: str | None = None
+        result: str | None = None
+        payout: Decimal | None = None
+
+        if t.status == SpinStatus.CANCELLED:
+            placement = "Cancelled"
+            payout = Decimal("0.00")  # entry refunded
+        elif t.status == SpinStatus.FINISHED:
+            if is_champ:
+                placement = "Champion"
+                result = "W"
+            else:
+                result = "L"
+                # The round of the game this player lost names their exit.
+                lost = next(
+                    (
+                        g
+                        for g in games
+                        if g.winner_id is not None
+                        and me_id in (g.player_a_id, g.player_b_id)
+                        and g.winner_id != me_id
+                    ),
+                    None,
+                )
+                placement = (
+                    f"Out · {_round_label(lost.round, rounds_total)}"
+                    if lost
+                    else "Eliminated"
+                )
+            pool = t.prize_pool if is_champ else Decimal("0.00")
+            payout = (pool + jackpot - t.entry_fee).quantize(Decimal("0.01"))
+        else:
+            placement = "In progress"
+
+        out.append(
+            MyTournamentOut(
+                id=t.id,
+                size=t.size,
+                entry_fee=t.entry_fee,
+                status=t.status,
+                placement=placement,
+                result=result,
+                won_jackpot=won_jackpot,
+                jackpot=jackpot,
+                payout=payout,
+                champion_username=(
+                    users[t.champion_id].faceit_username
+                    if t.champion_id in users
+                    else None
+                ),
+                created_at=t.created_at,
+                finished_at=t.finished_at,
+            )
+        )
+    return out
 
 
 async def serialize_my_matches(

@@ -10,6 +10,7 @@ export default function Dashboard() {
   const { user } = useAuth()
   const [matches, setMatches] = useState([])
   const [matchesLoaded, setMatchesLoaded] = useState(false)
+  const [spins, setSpins] = useState([])
 
   useEffect(() => {
     let active = true
@@ -23,6 +24,14 @@ export default function Dashboard() {
       })
       .finally(() => {
         if (active) setMatchesLoaded(true)
+      })
+    client
+      .get('/me/spincounters')
+      .then(({ data }) => {
+        if (active) setSpins(Array.isArray(data) ? data : [])
+      })
+      .catch(() => {
+        if (active) setSpins([])
       })
     return () => {
       active = false
@@ -144,8 +153,127 @@ export default function Dashboard() {
             </>
           )}
         </section>
+
+        {/* SpinCounters. Only shown once the player has entered one, so a
+            tables-only player never sees an empty section. */}
+        {spins.length > 0 && (
+          <section className="mt-10 sm:mt-12">
+            <h2 className="text-[10px] font-medium uppercase tracking-[0.28em] text-steel-500">
+              SpinCounters
+            </h2>
+
+            <ul className="mt-3 divide-y divide-line-dark border-y border-line-dark sm:hidden">
+              {spins.map((s) => (
+                <SpinCard key={s.id} spin={s} />
+              ))}
+            </ul>
+
+            <table className="mt-4 hidden w-full text-sm sm:table">
+              <thead>
+                <tr className="border-b border-line-dark text-left text-steel-500">
+                  <th className="py-2 text-[10px] font-medium uppercase tracking-[0.2em]">
+                    Bracket
+                  </th>
+                  <th className="py-2 text-[10px] font-medium uppercase tracking-[0.2em]">
+                    Placement
+                  </th>
+                  <th className="py-2 text-[10px] font-medium uppercase tracking-[0.2em]">
+                    Entry
+                  </th>
+                  <th className="py-2 text-[10px] font-medium uppercase tracking-[0.2em]">
+                    Jackpot
+                  </th>
+                  <th className="py-2 text-[10px] font-medium uppercase tracking-[0.2em]">
+                    Net
+                  </th>
+                  <th className="py-2 text-[10px] font-medium uppercase tracking-[0.2em]">
+                    Date
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line-dark">
+                {spins.map((s) => (
+                  <SpinRow key={s.id} spin={s} />
+                ))}
+              </tbody>
+            </table>
+          </section>
+        )}
       </main>
     </div>
+  )
+}
+
+function SpinRow({ spin }) {
+  const isWin = spin.result === 'W'
+  const isLoss = spin.result === 'L'
+  return (
+    <tr className="text-steel-100">
+      <td className="py-3 font-display text-sm font-bold italic text-accent">
+        {spin.size}P
+      </td>
+      <td className="py-3">
+        <span className={isWin ? 'font-medium text-win' : 'text-steel-300'}>
+          {spin.placement || spin.status}
+        </span>
+      </td>
+      <td className="py-3 text-steel-400">{money(spin.entry_fee)}</td>
+      <td className="py-3">
+        {spin.won_jackpot ? (
+          <span className="font-medium text-win">+{money(spin.jackpot)}</span>
+        ) : (
+          <span className="text-steel-600">—</span>
+        )}
+      </td>
+      <td
+        className={`py-3 font-medium ${
+          spin.payout > 0 ? 'text-win' : spin.payout < 0 ? 'text-loss' : 'text-steel-500'
+        }`}
+      >
+        {spin.payout != null ? signedMoney(spin.payout) : '-'}
+      </td>
+      <td className="py-3 text-steel-500">{formatDate(spin.created_at)}</td>
+    </tr>
+  )
+}
+
+function SpinCard({ spin }) {
+  const isWin = spin.result === 'W'
+  return (
+    <li className="flex items-center justify-between gap-3 py-3">
+      <div className="min-w-0">
+        <div className="flex items-baseline gap-2">
+          <span className="font-display text-sm font-bold italic text-accent">
+            {spin.size}P
+          </span>
+          <span
+            className={`truncate text-sm font-medium ${isWin ? 'text-win' : 'text-steel-100'}`}
+          >
+            {spin.placement || spin.status}
+          </span>
+        </div>
+        <div className="mt-0.5 text-[11px] text-steel-500">
+          {money(spin.entry_fee)} entry
+          {spin.won_jackpot && (
+            <span className="text-win"> · jackpot +{money(spin.jackpot)}</span>
+          )}{' '}
+          · {formatDate(spin.created_at)}
+        </div>
+      </div>
+      <div className="shrink-0 text-right">
+        {spin.payout != null ? (
+          <div
+            className={`font-display text-sm font-bold ${
+              spin.payout > 0 ? 'text-win' : spin.payout < 0 ? 'text-loss' : 'text-steel-500'
+            }`}
+          >
+            {signedMoney(spin.payout)}
+          </div>
+        ) : (
+          <div className="text-xs text-steel-500">{spin.status}</div>
+        )}
+      </div>
+    </li>
   )
 }
 

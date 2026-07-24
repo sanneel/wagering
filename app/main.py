@@ -19,11 +19,44 @@ logging.basicConfig(
 logger = logging.getLogger("app")
 
 
+def _assert_production_safe() -> None:
+    """Fail closed if production is misconfigured in a way that risks money/auth.
+
+    These defaults are convenient for the demo but dangerous in production: a
+    default JWT secret makes every token forgeable (account takeover), and demo
+    mode bypasses the real payment provider and settles matches with bots. It is
+    far better to refuse to boot than to serve real money on either. This only
+    ever triggers when ENVIRONMENT=production, so the demo is unaffected.
+    """
+    if settings.environment != "production":
+        return
+    problems: list[str] = []
+    if settings.jwt_secret in ("", "change-me"):
+        problems.append("JWT_SECRET is unset or left at the default")
+    if settings.demo_mode:
+        problems.append("DEMO_MODE is on (bots + instant, provider-less money)")
+    if problems:
+        raise RuntimeError(
+            "Refusing to start in production: "
+            + "; ".join(problems)
+            + ". Set these before deploying."
+        )
+    # Non-fatal, but worth shouting about.
+    if not settings.faceit_webhook_secret:
+        logger.warning("FACEIT_WEBHOOK_SECRET unset — FACEIT webhooks are rejected")
+    if not settings.payed_webhook_secret:
+        logger.warning("PAYED_WEBHOOK_SECRET unset — deposit webhooks are rejected")
+    if settings.auto_create_tables:
+        logger.warning("AUTO_CREATE_TABLES on in production — prefer Alembic migrations")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup must be fail-soft: on serverless every cold start runs this, and a
-    # transient DB/Redis hiccup here would crash the whole function instead of
-    # failing one request. Log and continue; handlers surface errors per-request.
+    # Misconfigured production is a hard stop, checked before anything else.
+    _assert_production_safe()
+    # The rest of startup is fail-soft: on serverless every cold start runs this,
+    # and a transient DB/Redis hiccup here would crash the whole function instead
+    # of failing one request. Log and continue; handlers surface errors per-request.
     if settings.auto_create_tables:
         # For real production prefer Alembic migrations over create_all.
         try:

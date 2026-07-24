@@ -32,11 +32,13 @@ app/
 | Method | Path | Description |
 | --- | --- | --- |
 | GET  | `/auth/faceit` | Start FACEIT OAuth (or, in demo mode, mint a guest) |
-| GET  | `/auth/faceit/callback` | OAuth return → redirects to `FRONTEND_URL/auth/callback?token=<jwt>` |
+| GET  | `/auth/faceit/callback` | OAuth return → redirects to `FRONTEND_URL/auth/callback?code=<one-time>` (exchanged at `/auth/exchange`) |
+| POST | `/auth/exchange` | Trade a one-time code for a JWT (single-use, keeps the token out of the URL) |
 | POST | `/auth/faceit` | Programmatic code→JWT exchange (JSON) |
 | POST | `/auth/demo` | Create a throwaway guest with a starting balance (demo mode) |
 | GET  | `/me` | Current user profile + balance |
 | GET  | `/me/matches` | Current user's match history (opponent, W/L, payout) |
+| GET  | `/me/spincounters` | Current user's SpinCounter history (placement, jackpot, net) |
 | GET  | `/matches/recent` | Last 10 finished matches — **public, no auth** |
 | GET  | `/formats` | Formats this server accepts (`1v1`, `2v2`, `5v5`) — **public, no auth** |
 | GET  | `/tables` | Open tables still filling; `?team_size=` filters by format |

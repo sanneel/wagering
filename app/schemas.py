@@ -154,6 +154,26 @@ class MyMatchOut(BaseModel):
     finished_at: datetime | None = None
 
 
+class MyTournamentOut(BaseModel):
+    """One row of the current user's SpinCounter history, from their side."""
+
+    id: int
+    size: int
+    entry_fee: Decimal
+    status: SpinStatus
+    # "Champion" | "Eliminated · Semifinal" | "In progress" | "Cancelled".
+    placement: str | None = None
+    result: str | None = None  # 'W' (champion) | 'L' (knocked out) | None
+    won_jackpot: bool = False
+    jackpot: Decimal = Decimal("0.00")
+    # Net across the whole tournament from this player's side: pool won plus
+    # jackpot won, less the entry — or 0 when refunded, None while unresolved.
+    payout: Decimal | None = None
+    champion_username: str | None = None
+    created_at: datetime
+    finished_at: datetime | None = None
+
+
 # ─── SpinCounter (1v1 bracket tournaments) ──────────────────────────────
 class WheelSegmentOut(BaseModel):
     """One segment on the Wheel of Fortune, for drawing the wheel."""
