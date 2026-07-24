@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     debug: bool = False
     api_base_url: str = "https://api.1v1wager.com"
-    # Where the browser app lives — OAuth callback redirects here with ?token=.
+    # Where the browser app lives — OAuth callback redirects here with ?code=.
     frontend_url: str = "http://localhost:5173"
 
     # Demo mode: bypass real FACEIT/Payed calls so the app is clickable end-to-end.

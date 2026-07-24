@@ -4,6 +4,11 @@ FastAPI backend for a P2P CS2 skill-wagering platform (1v1wager.com).
 
 Stack: **FastAPI · PostgreSQL (async SQLAlchemy 2.0 / asyncpg) · Redis · Payed.co · FACEIT**
 
+**Further reading:** [`docs/PLATFORM_REVIEW.md`](docs/PLATFORM_REVIEW.md) (what's
+wired, ranked open risks, roadmap) and
+[`docs/PLATFORM_ECONOMICS.md`](docs/PLATFORM_ECONOMICS.md) (fee/rake model, bonus
+budget, retention plan). Money-critical tests: `bash tests/run.sh`.
+
 ## Layout
 
 ```
@@ -39,6 +44,10 @@ app/
 | GET  | `/me` | Current user profile + balance |
 | GET  | `/me/matches` | Current user's match history (opponent, W/L, payout) |
 | GET  | `/me/spincounters` | Current user's SpinCounter history (placement, jackpot, net) |
+| GET  | `/me/rewards` | Daily-reward availability + welcome-bonus state |
+| POST | `/me/rewards/daily` | Claim the daily reward (24h cooldown) |
+| PUT  | `/me/limits` | Set/clear a self-imposed daily deposit cap |
+| POST | `/me/self-exclude` | Self-exclude for N days (blocks deposits + wagering) |
 | GET  | `/matches/recent` | Last 10 finished matches — **public, no auth** |
 | GET  | `/formats` | Formats this server accepts (`1v1`, `2v2`, `5v5`) — **public, no auth** |
 | GET  | `/tables` | Open tables still filling; `?team_size=` filters by format |
