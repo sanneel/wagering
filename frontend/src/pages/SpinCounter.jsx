@@ -143,40 +143,38 @@ export default function SpinCounter() {
       <main className="mx-auto max-w-6xl px-6 pb-24 pt-10">
         <div className="grid gap-8 lg:grid-cols-[1fr_auto] lg:items-center">
           <div>
-            <p className="text-[10px] font-medium uppercase tracking-[0.3em] text-accent">
+            <p className="text-xs uppercase tracking-[0.18em] text-steel-500">
               SpinCounter
             </p>
-            <h1 className="mt-2 font-display text-5xl font-black uppercase italic leading-none tracking-tight text-white">
+            <h1 className="mt-2 font-display text-5xl font-semibold tracking-tight text-white">
               Spin, then counter
             </h1>
-            <p className="mt-3 max-w-md text-sm leading-relaxed text-steel-400">
-              A 1v1 knockout bracket. Everyone pays the same entry. The moment
-              the bracket fills, the counter spins and drops a jackpot on one
-              lucky entrant — then you fight through the bracket for the prize
-              pool. Two ways to win, one buy-in.
+            <p className="mt-4 max-w-md text-sm leading-relaxed text-steel-400">
+              A 1v1 knockout bracket. Everyone pays the same entry. When it
+              fills, the counter spins and drops a jackpot on one lucky entrant;
+              then you fight through the bracket for the pool. Two ways to win,
+              one buy-in.
             </p>
-            <div className="mt-5 flex flex-wrap gap-3 text-xs">
-              <Badge>Jackpot up to {money(topPrize)}</Badge>
-              <Badge>Best of {config?.rounds_best_of ?? 3}</Badge>
-              <Badge>Winner takes the pool</Badge>
-            </div>
+            <p className="mt-5 text-xs text-steel-500">
+              Jackpot up to{' '}
+              <span className="text-steel-300">{money(topPrize)}</span> · Best of{' '}
+              <span className="text-steel-300">{config?.rounds_best_of ?? 3}</span>{' '}
+              · Winner takes the pool
+            </p>
           </div>
-          <div className="w-full max-w-[20rem] justify-self-center rounded-2xl border border-line-dark bg-graphite-900/60 p-6">
-            <div className="mb-3 text-center text-[10px] font-semibold uppercase tracking-[0.24em] text-steel-500">
-              The counter spins
-            </div>
+          <div className="w-full max-w-[20rem] justify-self-center rounded-xl bg-graphite-900 p-6">
             <PrizeCounter idle slots={4} />
-            <div className="mt-3 text-center text-[11px] text-steel-500">
-              lands on your jackpot up to {money(topPrize)}
-            </div>
+            <p className="mt-4 text-center text-xs text-steel-500">
+              Lands on a jackpot up to {money(topPrize)}
+            </p>
           </div>
         </div>
 
         {/* ── Open a SpinCounter ── */}
         <section className="mt-12 overflow-hidden rounded-xl border border-line-dark bg-graphite-900">
           <div className="border-b border-line-dark px-6 py-4">
-            <h2 className="font-display text-xl font-bold uppercase italic tracking-tight text-white">
-              Open a SpinCounter
+            <h2 className="font-display text-2xl font-semibold tracking-tight text-white">
+              Open a bracket
             </h2>
           </div>
 
@@ -199,7 +197,7 @@ export default function SpinCounter() {
                         }`}
                       >
                         <div
-                          className={`font-display text-2xl font-black italic leading-none ${
+                          className={`font-display text-2xl font-semibold leading-none ${
                             on ? 'text-accent' : 'text-white'
                           }`}
                         >
@@ -282,7 +280,7 @@ export default function SpinCounter() {
         {/* ── Browse ── */}
         <section className="mt-14">
           <div className="flex flex-wrap items-center justify-between gap-4">
-            <h2 className="font-display text-xl font-bold uppercase italic tracking-tight text-white">
+            <h2 className="font-display text-2xl font-semibold tracking-tight text-white">
               Open brackets
             </h2>
             <div className="flex gap-2">
@@ -322,18 +320,10 @@ export default function SpinCounter() {
   )
 }
 
-function Badge({ children }) {
-  return (
-    <span className="rounded-full border border-line-dark bg-graphite-900 px-3 py-1.5 font-semibold uppercase tracking-wide text-steel-300">
-      {children}
-    </span>
-  )
-}
-
 function Field({ label, children }) {
   return (
     <div>
-      <div className="mb-3 text-[10px] font-medium uppercase tracking-[0.24em] text-steel-500">
+      <div className="mb-3 text-xs uppercase tracking-[0.15em] text-steel-500">
         {label}
       </div>
       {children}
@@ -346,7 +336,7 @@ function Chip({ on, onClick, children }) {
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full border px-4 py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors ${
+      className={`rounded-full border px-4 py-1.5 text-xs font-medium transition-colors ${
         on
           ? 'border-accent bg-accent text-white'
           : 'border-line-dark text-steel-400 hover:border-steel-500 hover:text-steel-100'
@@ -364,40 +354,40 @@ function Summary({ size, fee, balance, topPrize, busy, onOpen }) {
 
   return (
     <>
-      <div className="text-[10px] font-medium uppercase tracking-[0.24em] text-steel-500">
+      <div className="text-xs uppercase tracking-[0.15em] text-steel-500">
         You put in
       </div>
-      <div className="mt-1 font-display text-4xl font-black italic leading-none text-white">
+      <div className="mt-1 font-display text-4xl font-semibold leading-none text-white">
         {valid ? money(fee) : '-'}
       </div>
 
-      <dl className="mt-5 space-y-2 border-t border-line-dark pt-4 text-xs">
+      <dl className="mt-5 space-y-2 border-t border-line-dark pt-4 text-sm">
         <Line k="Bracket" v={`${size} players`} />
         <Line k="Prize pool" v={valid ? money(pool) : '-'} />
         <Line k="Rake" v="0%" />
       </dl>
 
-      <div className="mt-4 rounded-md border border-accent/30 bg-accent/10 p-3">
-        <div className="text-[10px] uppercase tracking-[0.2em] text-accent">
-          Champion takes
+      <div className="mt-5 border-t border-line-dark pt-4">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="text-sm text-steel-400">Champion takes</span>
+          <span className="font-display text-xl font-semibold text-white">
+            {valid ? money(pool) : '-'}
+          </span>
         </div>
-        <div className="mt-0.5 font-display text-2xl font-bold leading-none text-white">
-          {valid ? money(pool) : '-'}
-        </div>
-        <div className="mt-1 text-[10px] text-steel-400">
-          plus a counter jackpot up to {money(topPrize)} for one lucky entrant
-        </div>
+        <p className="mt-1 text-xs leading-relaxed text-steel-500">
+          Plus a jackpot up to {money(topPrize)} for one lucky entrant.
+        </p>
       </div>
 
       <button
         type="button"
         onClick={onOpen}
         disabled={busy || !valid || short}
-        className="mt-5 w-full rounded-md bg-accent px-4 py-3 text-sm font-semibold uppercase tracking-wide text-white transition-colors hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-40"
+        className="mt-5 w-full rounded-md bg-accent px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-40"
       >
         {busy ? 'Opening…' : short ? 'Not enough balance' : 'Open bracket'}
       </button>
-      <p className="mt-2 text-center text-[10px] leading-relaxed text-steel-500">
+      <p className="mt-3 text-center text-xs leading-relaxed text-steel-500">
         Your entry is escrowed when the bracket opens. Leave before it fills and
         you get it back.
       </p>
@@ -428,39 +418,35 @@ function TournamentRow({ t, meId, busy, onJoin, onWatch }) {
   return (
     <div className="group rounded-lg border border-line-dark bg-graphite-900 p-4 transition-colors hover:border-steel-500/60">
       <div className="flex items-center gap-4">
-        <div className="font-display text-2xl font-black italic leading-none text-accent">
+        <div className="font-display text-xl font-semibold leading-none text-steel-300">
           {t.size}P
         </div>
         <div className="min-w-0">
-          <div className="text-[10px] uppercase tracking-[0.18em] text-steel-500">
-            Entry · Pool
-          </div>
+          <div className="text-[11px] text-steel-500">Entry · Pool</div>
           <div className="flex items-baseline gap-2 font-display leading-none">
-            <span className="text-base font-bold text-white sm:text-lg">
+            <span className="text-lg font-semibold text-white">
               {money(t.entry_fee)}
             </span>
-            <span className="text-xs text-steel-500">/</span>
-            <span className="text-base font-bold text-accent sm:text-lg">
-              {money(pool)}
-            </span>
+            <span className="text-xs text-steel-600">/</span>
+            <span className="text-lg font-semibold text-accent">{money(pool)}</span>
           </div>
         </div>
         <div className="ml-auto flex items-center gap-3">
-          <span className="hidden text-xs text-steel-400 sm:inline">
+          <span className="hidden text-xs text-steel-500 sm:inline">
             {full ? 'Filling…' : `${t.open_seats}/${t.size} open`}
           </span>
           <button
             type="button"
             onClick={mine ? onWatch : onJoin}
             disabled={btnDisabled}
-            className={`shrink-0 rounded-md px-4 py-2 text-xs font-semibold uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-40 sm:px-5 sm:py-2.5 ${btnClass}`}
+            className={`shrink-0 rounded-md px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 sm:px-5 sm:py-2.5 ${btnClass}`}
           >
             {btnLabel}
           </button>
         </div>
       </div>
 
-      {/* Entrant pills — one per bracket seat, filled or empty. */}
+      {/* Entrant chips — one per bracket seat, filled or empty. */}
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
         {Array.from({ length: t.size }).map((_, i) => {
           const e = t.entries[i]
@@ -468,14 +454,14 @@ function TournamentRow({ t, meId, busy, onJoin, onWatch }) {
             <span
               key={i}
               title={e.player.faceit_username}
-              className="max-w-[7rem] truncate rounded border border-line-dark bg-graphite-800 px-2 py-1 text-[11px] text-steel-100"
+              className="max-w-[7rem] truncate rounded bg-graphite-800 px-2 py-1 text-[11px] text-steel-300"
             >
               {e.player.faceit_username}
             </span>
           ) : (
             <span
               key={i}
-              className="h-6 w-8 rounded border border-dashed border-line-dark"
+              className="h-6 w-8 rounded border border-dashed border-line-dark/60"
               aria-label="empty seat"
             />
           )
@@ -505,7 +491,7 @@ function RowSkeleton() {
 function EmptyState({ onOpen }) {
   return (
     <div className="rounded-lg border border-dashed border-line-dark bg-graphite-900/50 px-6 py-14 text-center">
-      <p className="font-display text-2xl font-bold uppercase italic text-steel-100">
+      <p className="font-display text-2xl font-semibold text-steel-100">
         No brackets open
       </p>
       <p className="mx-auto mt-2 max-w-sm text-sm text-steel-400">
@@ -515,9 +501,9 @@ function EmptyState({ onOpen }) {
       <button
         type="button"
         onClick={onOpen}
-        className="mt-5 rounded-md bg-accent px-6 py-2.5 text-xs font-semibold uppercase tracking-wide text-white transition-colors hover:bg-accent-dark"
+        className="mt-5 rounded-md bg-accent px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-dark"
       >
-        Open a SpinCounter
+        Open a bracket
       </button>
     </div>
   )

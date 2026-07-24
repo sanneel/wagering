@@ -64,7 +64,7 @@ export default function PrizeCounter({
 
   return (
     <div className="flex items-center justify-center gap-1.5">
-      <span className="mb-1 font-display text-3xl font-black italic text-accent">$</span>
+      <span className="mb-0.5 font-display text-3xl font-semibold text-steel-400">$</span>
       {digits.map((d, i) => (
         <div key={i} className="prize-reel" style={{ height: CELL, width: CELL * 0.82 }}>
           {idle ? (

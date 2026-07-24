@@ -194,30 +194,27 @@ export default function SpinLobby() {
         {t && (
           <>
             <div className="text-center">
-              <p className="text-[10px] font-medium uppercase tracking-[0.3em] text-accent">
-                {t.size}-player SpinCounter
+              <p className="text-xs uppercase tracking-[0.18em] text-steel-500">
+                {t.size}-player bracket
               </p>
-              <h1 className="mt-2 font-display text-4xl font-black uppercase italic leading-none tracking-tight text-white">
-                {money(t.prize_pool || parseFloat(t.entry_fee) * t.size)} pool
+              <h1 className="mt-1.5 font-display text-4xl font-semibold tracking-tight text-white">
+                {money(t.prize_pool || parseFloat(t.entry_fee) * t.size)}{' '}
+                <span className="text-steel-500">pool</span>
               </h1>
-              <p className="mt-3 text-sm font-medium text-steel-100">
+              <p className="mt-2 text-sm text-steel-400">
                 {STATUS_TEXT[t.status] || t.status}
               </p>
               {pending && (
                 <p className="mt-1 text-xs text-steel-500">
-                  {t.open_seats} of {t.size} seats still open · {money(t.entry_fee)}{' '}
-                  entry
+                  {t.open_seats} of {t.size} seats open · {money(t.entry_fee)} entry
                 </p>
               )}
             </div>
 
             {/* ── The counter spins for the jackpot ── */}
             {showReveal && (
-              <div className="mt-10 flex flex-col items-center">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-accent">
-                  Jackpot counter
-                </div>
-                <div className="mt-4 rounded-2xl border border-line-dark bg-graphite-900/60 p-6">
+              <div className="mt-12 flex flex-col items-center">
+                <div className="rounded-xl bg-graphite-900 px-6 py-5">
                   <PrizeCounter
                     amount={parseFloat(t.wheel_prize)}
                     landOn
@@ -236,23 +233,21 @@ export default function SpinLobby() {
 
             {/* ── Your live match: the FACEIT call to action ── */}
             {myLiveGame && (
-              <div className="live-pulse mx-auto mt-10 max-w-xl rounded-xl border border-accent/50 bg-accent/10 p-5">
+              <div className="mx-auto mt-10 max-w-xl rounded-xl border border-line-dark bg-graphite-900 p-5">
                 <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-between">
                   <div className="text-center sm:text-left">
                     <div className="flex items-center justify-center gap-2 sm:justify-start">
-                      <span className="relative flex h-2 w-2">
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
-                        <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
-                      </span>
-                      <span className="text-[10px] font-semibold uppercase tracking-[0.24em] text-accent">
-                        Your match is live
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+                      <span className="text-xs uppercase tracking-[0.15em] text-steel-400">
+                        Your match
                       </span>
                     </div>
-                    <div className="mt-1.5 font-display text-xl font-bold italic text-white">
-                      {myLiveGame.player_a?.faceit_username} vs{' '}
+                    <div className="mt-1.5 font-display text-2xl font-semibold text-white">
+                      {myLiveGame.player_a?.faceit_username}{' '}
+                      <span className="text-steel-500">vs</span>{' '}
                       {myLiveGame.player_b?.faceit_username}
                     </div>
-                    <div className="mt-0.5 text-[11px] text-steel-400">
+                    <div className="mt-0.5 text-xs text-steel-500">
                       {roundLabel(myLiveGame.round, t.rounds_total)} · best of{' '}
                       {t.rounds_best_of}
                     </div>
@@ -262,12 +257,12 @@ export default function SpinLobby() {
                       href={faceitRoom(myLiveGame.faceit_match_id)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="shrink-0 rounded-md bg-accent px-6 py-3 text-xs font-semibold uppercase tracking-wide text-white transition-colors hover:bg-accent-dark"
+                      className="shrink-0 rounded-md bg-accent px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-accent-dark"
                     >
                       Open FACEIT room
                     </a>
                   ) : (
-                    <span className="shrink-0 rounded-md border border-line-dark px-6 py-3 text-xs font-semibold uppercase tracking-wide text-steel-400">
+                    <span className="shrink-0 rounded-md border border-line-dark px-6 py-3 text-sm text-steel-400">
                       Setting up match…
                     </span>
                   )}
@@ -278,24 +273,24 @@ export default function SpinLobby() {
             {/* ── Still in it, waiting on another match ── */}
             {stillIn && !myLiveGame && locked && (
               <p className="mt-8 text-center text-sm text-steel-400">
-                You&apos;re through — waiting on the other match to set your next
+                You&apos;re through. Waiting on the other match to set your next
                 opponent.
               </p>
             )}
 
             {/* ── Champion banner ── */}
             {finished && t.champion && (
-              <div className="mx-auto mt-10 max-w-md rounded-xl border border-accent/40 bg-accent/10 p-6 text-center">
-                <div className="text-[10px] uppercase tracking-[0.24em] text-accent">
+              <div className="mx-auto mt-10 max-w-md rounded-xl border border-line-dark bg-graphite-900 p-6 text-center">
+                <p className="text-xs uppercase tracking-[0.18em] text-steel-500">
                   Champion
-                </div>
-                <div className="mt-1 font-display text-3xl font-black italic text-white">
+                </p>
+                <div className="mt-1.5 font-display text-3xl font-semibold text-white">
                   {t.champion.faceit_username}
                   {t.champion.id === meId && (
-                    <span className="ml-2 text-sm not-italic text-accent">you</span>
+                    <span className="ml-2 text-sm text-accent">you</span>
                   )}
                 </div>
-                <div className="mt-1 text-sm text-steel-300">
+                <div className="mt-1 text-sm text-steel-400">
                   takes the {money(t.prize_pool)} pool
                 </div>
               </div>
@@ -322,7 +317,7 @@ export default function SpinLobby() {
 
                     {/* Center: the final. */}
                     <div className="spin-col flex min-w-[15rem] flex-col">
-                      <div className="mb-3 text-center text-[10px] font-semibold uppercase tracking-[0.2em] text-accent">
+                      <div className="mb-3 text-center text-[10px] font-medium uppercase tracking-[0.2em] text-steel-400">
                         Final
                       </div>
                       <div className="spin-round h-[calc(100%-1.5rem)]">
@@ -333,19 +328,6 @@ export default function SpinLobby() {
                             emphasis
                             masked={isMasked(bracket.finalGame, meId, finished)}
                           />
-                          {t.champion && (
-                            <div className="mt-3 flex items-center justify-center gap-2 text-center">
-                              <span className="text-lg">🏆</span>
-                              <span className="font-display text-sm font-bold italic text-white">
-                                {t.champion.faceit_username}
-                                {t.champion.id === meId && (
-                                  <span className="ml-1.5 text-[10px] not-italic uppercase text-accent">
-                                    you
-                                  </span>
-                                )}
-                              </span>
-                            </div>
-                          )}
                         </div>
                       </div>
                     </div>
@@ -422,7 +404,7 @@ export default function SpinLobby() {
                   type="button"
                   onClick={leave}
                   disabled={!!busy}
-                  className="rounded-md border border-line-dark px-5 py-2.5 text-xs font-semibold uppercase tracking-wide text-steel-100 transition-colors hover:border-loss hover:text-loss disabled:opacity-40"
+                  className="rounded-md border border-line-dark px-5 py-2.5 text-sm font-medium text-steel-100 transition-colors hover:border-loss hover:text-loss disabled:opacity-40"
                 >
                   {busy === 'leave' ? 'Leaving…' : 'Leave bracket'}
                 </button>
@@ -432,7 +414,7 @@ export default function SpinLobby() {
                   type="button"
                   onClick={cancel}
                   disabled={!!busy}
-                  className="rounded-md border border-line-dark px-5 py-2.5 text-xs font-semibold uppercase tracking-wide text-steel-100 transition-colors hover:border-loss hover:text-loss disabled:opacity-40"
+                  className="rounded-md border border-line-dark px-5 py-2.5 text-sm font-medium text-steel-100 transition-colors hover:border-loss hover:text-loss disabled:opacity-40"
                 >
                   {busy === 'cancel' ? 'Cancelling…' : 'Cancel bracket'}
                 </button>
@@ -441,7 +423,7 @@ export default function SpinLobby() {
                 <button
                   type="button"
                   onClick={() => navigate('/spincounter')}
-                  className="rounded-md bg-accent px-6 py-2.5 text-xs font-semibold uppercase tracking-wide text-white transition-colors hover:bg-accent-dark"
+                  className="rounded-md bg-accent px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-dark"
                 >
                   Back to brackets
                 </button>
@@ -479,20 +461,18 @@ function RevealResult({ t, meId, revealed, finished }) {
   const reveal = mine || finished
   const name = reveal ? (won ? won.faceit_username : '—') : 'a lucky entrant'
   return (
-    <div className="mt-6 text-center">
-      <div className="text-[10px] uppercase tracking-[0.24em] text-steel-500">
-        Jackpot
+    <div className="mt-5 text-center">
+      <div className="font-display text-2xl font-semibold text-white">
+        {money(t.wheel_prize)}{' '}
+        <span className="text-base font-normal text-steel-400">to {name}</span>
+        {mine && <span className="ml-1 text-sm text-accent">— you</span>}
       </div>
-      <div className="mt-1 font-display text-2xl font-black italic text-white">
-        {money(t.wheel_prize)} to {name}
-        {mine && <span className="ml-2 text-sm not-italic text-accent">you</span>}
-      </div>
-      <p className="mt-1 text-[11px] text-steel-500">
+      <p className="mt-1.5 text-xs text-steel-500">
         {mine
-          ? 'That jackpot is yours, on top of the prize pool — now play the bracket.'
+          ? 'That jackpot is yours, on top of the prize pool. Now play the bracket.'
           : reveal
             ? 'A house jackpot on top of the prize pool.'
-            : 'A house jackpot dropped on one entrant — now play the bracket.'}
+            : 'A house jackpot dropped on one entrant. Now play the bracket.'}
       </p>
     </div>
   )
@@ -525,14 +505,8 @@ function GameCard({ g, meId, emphasis = false, masked = false }) {
   const done = g.status === 'FINISHED'
   return (
     <div
-      className={`rounded-lg border p-3 ${
-        masked
-          ? 'border-line-dark bg-graphite-900'
-          : emphasis
-            ? 'border-accent/50 bg-accent/5 ring-1 ring-accent/20'
-            : live
-              ? 'border-accent/40 bg-graphite-900'
-              : 'border-line-dark bg-graphite-900'
+      className={`rounded-lg border bg-graphite-900 p-3 ${
+        emphasis && !masked ? 'border-accent/40' : 'border-line-dark'
       }`}
     >
       <Player
@@ -545,7 +519,7 @@ function GameCard({ g, meId, emphasis = false, masked = false }) {
       />
       <div className="my-1 flex items-center gap-2">
         <div className="h-px flex-1 bg-line-dark" />
-        <span className="text-[9px] font-bold uppercase tracking-widest text-steel-500">
+        <span className="text-[9px] uppercase tracking-widest text-steel-600">
           {masked ? 'hidden' : live ? 'live' : 'vs'}
         </span>
         <div className="h-px flex-1 bg-line-dark" />
