@@ -1,5 +1,7 @@
-# The backend function doesn't need the frontend, local DB, or dev cruft.
+# The backend function doesn't need the frontend, tests, local DB, or dev cruft.
 frontend/
+tests/
+docs/
 .venv/
 .worktrees/
 .agents/

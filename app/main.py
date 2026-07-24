@@ -35,6 +35,10 @@ def _assert_production_safe() -> None:
         problems.append("JWT_SECRET is unset or left at the default")
     if settings.demo_mode:
         problems.append("DEMO_MODE is on (bots + instant, provider-less money)")
+    if not settings.redis_enabled:
+        # Webhook idempotency (no double-credited deposits) and rate limiting
+        # both depend on Redis; running without it in production is unsafe.
+        problems.append("REDIS_ENABLED is off (webhook idempotency + rate limits need it)")
     if problems:
         raise RuntimeError(
             "Refusing to start in production: "

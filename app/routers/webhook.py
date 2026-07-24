@@ -166,9 +166,6 @@ async def payed_webhook(
     if not payment_ref:
         raise HTTPException(status_code=400, detail="missing payment_ref")
 
-    if not await mark_webhook_seen(f"payed:{payment_ref}:{event}:{status_str}"):
-        return {"status": "duplicate_ignored"}
-
     # Only settle successful deposit payments here.
     is_success = event in ("payment.succeeded", "payment_completed") or status_str in (
         "completed",
@@ -177,6 +174,15 @@ async def payed_webhook(
     )
     if not is_success:
         return {"status": "ignored", "event": event, "payment_status": status_str}
+
+    # Idempotency is keyed on the PAYMENT, not the event name: a payment is
+    # credited at most once no matter how many success events (or event-name
+    # variants) the provider sends for it. Only success events consume the slot,
+    # so a "pending" event can't block the later "succeeded" from crediting.
+    # (This is a Redis marker; the durable single-credit guarantee still wants a
+    # settled-state column on the deposit — see PLATFORM_REVIEW.md.)
+    if not await mark_webhook_seen(f"payed:credited:{payment_ref}"):
+        return {"status": "duplicate_ignored"}
 
     # Find the pending deposit row created at /wallet/deposit.
     tx = (
@@ -193,9 +199,8 @@ async def payed_webhook(
         logger.warning("payed webhook for unknown deposit ref %s", payment_ref)
         return {"status": "unknown_deposit"}
 
-    # Idempotency guard: a settled deposit has balance_after reflecting the credit.
-    # We detect "already settled" via a Redis marker set below; if the marker was
-    # newly created above, this is the first settlement.
+    # We only reach here on the first success event for this payment_ref (the
+    # marker above claimed it), so this credits exactly once.
     user = await ledger.lock_user(db, tx.user_id)
     new_balance = ledger.quantize(user.balance + tx.amount)
     user.balance = new_balance
