@@ -225,7 +225,12 @@ export default function SpinLobby() {
                     onSettle={() => setRevealed(true)}
                   />
                 </div>
-                <RevealResult t={t} meId={meId} revealed={revealed} />
+                <RevealResult
+                  t={t}
+                  meId={meId}
+                  revealed={revealed}
+                  finished={finished}
+                />
               </div>
             )}
 
@@ -458,7 +463,7 @@ export default function SpinLobby() {
   )
 }
 
-function RevealResult({ t, meId, revealed }) {
+function RevealResult({ t, meId, revealed, finished }) {
   if (!revealed) {
     return (
       <p className="mt-6 animate-pulse text-sm font-medium uppercase tracking-[0.2em] text-steel-400">
@@ -468,17 +473,26 @@ function RevealResult({ t, meId, revealed }) {
   }
   const won = t.wheel_winner
   const mine = won?.id === meId
+  // The amount is always shown, but the winner's name stays hidden while the
+  // bracket is live — unless it's you (your own good news lands right away).
+  // Everyone else's name is revealed only once the bracket finishes.
+  const reveal = mine || finished
+  const name = reveal ? (won ? won.faceit_username : '—') : 'a lucky entrant'
   return (
     <div className="mt-6 text-center">
       <div className="text-[10px] uppercase tracking-[0.24em] text-steel-500">
         Jackpot
       </div>
       <div className="mt-1 font-display text-2xl font-black italic text-white">
-        {money(t.wheel_prize)} to {won ? won.faceit_username : '—'}
+        {money(t.wheel_prize)} to {name}
         {mine && <span className="ml-2 text-sm not-italic text-accent">you</span>}
       </div>
       <p className="mt-1 text-[11px] text-steel-500">
-        A house jackpot on top of the prize pool — now play the bracket.
+        {mine
+          ? 'That jackpot is yours, on top of the prize pool — now play the bracket.'
+          : reveal
+            ? 'A house jackpot on top of the prize pool.'
+            : 'A house jackpot dropped on one entrant — now play the bracket.'}
       </p>
     </div>
   )
