@@ -251,8 +251,8 @@ def schedule_tournament_simulation(tournament_id: int, delay: float = 6.0) -> No
 
 
 # Sizes/entry fees for the standing SpinCounter tables, so the browse list has
-# a spread of brackets to look at.
-_SEED_SPINS = [(4, "3.00"), (2, "5.00"), (4, "10.00"), (8, "5.00")]
+# a spread of brackets to look at. (Sizes must be in SPIN_SIZES — 2 is disabled.)
+_SEED_SPINS = [(4, "3.00"), (8, "3.00"), (4, "10.00"), (8, "5.00")]
 
 
 async def seed_open_tournaments() -> None:

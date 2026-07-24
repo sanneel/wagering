@@ -30,6 +30,13 @@ function roundLabel(round, total) {
   return `Round ${round}`
 }
 
+const gameHasMe = (g, meId) => g.player_a?.id === meId || g.player_b?.id === meId
+
+// Names in a match you're not part of stay hidden until the whole bracket
+// finishes — you only ever see your own opponent, so you can't scout the other
+// side. A match with an undecided (null) player is naturally "TBD", not masked.
+const isMasked = (g, meId, finished) => !finished && !gameHasMe(g, meId)
+
 export default function SpinLobby() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -304,6 +311,7 @@ export default function SpinLobby() {
                         games={col.games}
                         feed="right"
                         meId={meId}
+                        finished={finished}
                       />
                     ))}
 
@@ -314,7 +322,12 @@ export default function SpinLobby() {
                       </div>
                       <div className="spin-round h-[calc(100%-1.5rem)]">
                         <div className="spin-match">
-                          <GameCard g={bracket.finalGame} meId={meId} emphasis />
+                          <GameCard
+                            g={bracket.finalGame}
+                            meId={meId}
+                            emphasis
+                            masked={isMasked(bracket.finalGame, meId, finished)}
+                          />
                           {t.champion && (
                             <div className="mt-3 flex items-center justify-center gap-2 text-center">
                               <span className="text-lg">🏆</span>
@@ -339,6 +352,7 @@ export default function SpinLobby() {
                         games={col.games}
                         feed="left"
                         meId={meId}
+                        finished={finished}
                       />
                     ))}
                   </div>
@@ -471,7 +485,7 @@ function RevealResult({ t, meId, revealed }) {
 }
 
 // One round's games as a bracket column, feeding toward the centre final.
-function BracketColumn({ label, games, feed, meId }) {
+function BracketColumn({ label, games, feed, meId, finished }) {
   return (
     <div
       className={`spin-col flex min-w-[14rem] flex-col ${
@@ -484,7 +498,7 @@ function BracketColumn({ label, games, feed, meId }) {
       <div className="spin-round h-[calc(100%-1.5rem)]">
         {games.map((g) => (
           <div key={g.id} className="spin-match">
-            <GameCard g={g} meId={meId} />
+            <GameCard g={g} meId={meId} masked={isMasked(g, meId, finished)} />
           </div>
         ))}
       </div>
@@ -492,17 +506,19 @@ function BracketColumn({ label, games, feed, meId }) {
   )
 }
 
-function GameCard({ g, meId, emphasis = false }) {
+function GameCard({ g, meId, emphasis = false, masked = false }) {
   const live = g.status === 'LIVE'
   const done = g.status === 'FINISHED'
   return (
     <div
       className={`rounded-lg border p-3 ${
-        emphasis
-          ? 'border-accent/50 bg-accent/5 ring-1 ring-accent/20'
-          : live
-            ? 'border-accent/40 bg-graphite-900'
-            : 'border-line-dark bg-graphite-900'
+        masked
+          ? 'border-line-dark bg-graphite-900'
+          : emphasis
+            ? 'border-accent/50 bg-accent/5 ring-1 ring-accent/20'
+            : live
+              ? 'border-accent/40 bg-graphite-900'
+              : 'border-line-dark bg-graphite-900'
       }`}
     >
       <Player
@@ -511,11 +527,12 @@ function GameCard({ g, meId, emphasis = false }) {
         won={done && g.winner_id === g.player_a?.id}
         lost={done && g.winner_id && g.winner_id !== g.player_a?.id}
         meId={meId}
+        masked={masked}
       />
       <div className="my-1 flex items-center gap-2">
         <div className="h-px flex-1 bg-line-dark" />
         <span className="text-[9px] font-bold uppercase tracking-widest text-steel-500">
-          {live ? 'live' : 'vs'}
+          {masked ? 'hidden' : live ? 'live' : 'vs'}
         </span>
         <div className="h-px flex-1 bg-line-dark" />
       </div>
@@ -525,13 +542,17 @@ function GameCard({ g, meId, emphasis = false }) {
         won={done && g.winner_id === g.player_b?.id}
         lost={done && g.winner_id && g.winner_id !== g.player_b?.id}
         meId={meId}
+        masked={masked}
       />
     </div>
   )
 }
 
-function Player({ player, score, won, lost, meId }) {
+function Player({ player, score, won, lost, meId, masked = false }) {
   const me = player && player.id === meId
+  // Until the bracket finishes, players in matches you're not part of stay
+  // hidden — you only ever see your own opponent, never scout the other side.
+  const name = !player ? 'TBD' : masked ? '???' : player.faceit_username
   return (
     <div
       className={`flex items-center gap-2 rounded px-2 py-1.5 ${
@@ -540,7 +561,7 @@ function Player({ player, score, won, lost, meId }) {
     >
       <span
         className={`min-w-0 flex-1 truncate text-sm ${
-          !player
+          !player || masked
             ? 'italic text-steel-600'
             : won
               ? 'font-semibold text-white'
@@ -549,15 +570,17 @@ function Player({ player, score, won, lost, meId }) {
                 : 'text-steel-100'
         }`}
       >
-        {player ? player.faceit_username : 'TBD'}
-        {me && <span className="ml-1.5 text-[10px] uppercase text-accent">you</span>}
+        {name}
+        {me && !masked && (
+          <span className="ml-1.5 text-[10px] uppercase text-accent">you</span>
+        )}
       </span>
       <span
         className={`font-display text-sm font-bold ${
           won ? 'text-accent' : 'text-steel-500'
         }`}
       >
-        {player ? score : '–'}
+        {masked ? '·' : player ? score : '–'}
       </span>
     </div>
   )

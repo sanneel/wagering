@@ -44,7 +44,7 @@ export default function SpinCounter() {
           setOpenSize(data.sizes[0])
         }
       })
-      .catch(() => setConfig({ sizes: [2, 4, 8], wheel: [] }))
+      .catch(() => setConfig({ sizes: [4, 8], wheel: [] }))
   }, [])
 
   const loadList = useCallback(async () => {
@@ -104,7 +104,7 @@ export default function SpinCounter() {
   }
 
   const balance = parseFloat(user?.balance ?? 0)
-  const sizes = config?.sizes ?? [2, 4, 8]
+  const sizes = config?.sizes ?? [4, 8]
   const wheel = config?.wheel ?? []
   const topPrize = wheel.reduce((m, s) => Math.max(m, parseFloat(s.amount)), 0)
 

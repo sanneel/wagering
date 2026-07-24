@@ -111,6 +111,14 @@ final resolves and the champion is paid the pool. Every entrant played, so every
 entry burns its owner's rollover at settle (losers included), the same
 settle-time rule matches use.
 
+The bracket is shown fog-of-war while it's live: a player only ever sees their
+own current opponent — every other match renders masked until the whole bracket
+FINISHES, at which point the full bracket (all names and scores) is revealed.
+It's a frontend presentation choice; the API always returns the complete
+bracket. Note `SPIN_SIZES` defaults to `4,8` — a 2-player bracket (a lone 1v1
+with no semifinal) is disabled for engagement but the code path still supports
+it, so prepending `2,` re-enables it.
+
 So a player has **two ways to win from one buy-in**: the counter jackpot (luck)
 and the bracket prize pool (skill). All money moves through `ledger` and every
 mutation locks the tournament row first, the same concurrency discipline as

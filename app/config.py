@@ -117,7 +117,10 @@ class Settings(BaseSettings):
     #
     # Bracket sizes (players): must be powers of two so the bracket is byeless.
     # 2 => final only, 4 => semis + final, 8 => quarters + semis + final.
-    spin_sizes: str = "2,4,8"
+    # 2 is intentionally disabled: a 2-player bracket is just one 1v1 with no
+    # semifinal suspense, which reads as weak engagement. The code path still
+    # supports it — put "2," back at the front of the list to re-enable it.
+    spin_sizes: str = "4,8"
     # Buy-in bounds, per player.
     spin_min_entry: Decimal = Decimal("1.00")
     spin_max_entry: Decimal = Decimal("500.00")
