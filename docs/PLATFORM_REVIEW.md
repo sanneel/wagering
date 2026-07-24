@@ -6,6 +6,17 @@ scale. Written to be read top-to-bottom — the ordering _is_ the priority.
 
 _Last updated: 2026-07 (after the SpinCounter feature landed)._
 
+> **Shipped since this review was first written** (see git log): the deposit
+> double-credit window is closed and the production start-up guard now also
+> requires Redis; the SpinCounter jackpot was refactored from a ~$47-per-$12
+> money pit into a self-funding, EV-neutral model; a welcome + daily **bonus**
+> system and self-service **responsible-gaming** controls (deposit limit,
+> self-exclusion) plus an 18+ age gate and a Terms/RG page were added; and the
+> economics are written up in [`PLATFORM_ECONOMICS.md`](PLATFORM_ECONOMICS.md).
+> The **High** risks below (durable money idempotency, withdrawal state machine,
+> admin/ops surface, anti-collusion, real KYC/AML) remain the priority — they
+> need Alembic and supervised changes to the money path.
+
 ---
 
 ## 1. What this is
