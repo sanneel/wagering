@@ -124,12 +124,19 @@ export default function Landing() {
       </main>
 
       <footer className="border-t border-line-dark">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-6 py-8 text-xs text-steel-500">
-          <span>
-            1v1wager. Wager responsibly. Must be of legal age in your
-            jurisdiction.
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-6 py-8 text-xs text-steel-500">
+          <span className="flex items-center gap-3">
+            <span className="rounded border border-line-dark px-1.5 py-0.5 font-semibold text-steel-400">
+              18+
+            </span>
+            <span>
+              1v1wager. Wager responsibly — only stake what you can afford to
+              lose.
+            </span>
           </span>
-          <span className="uppercase tracking-[0.24em]">EST. 2026</span>
+          <a href="/legal" className="uppercase tracking-[0.24em] hover:text-steel-100">
+            Terms &amp; responsible gaming
+          </a>
         </div>
       </footer>
     </div>

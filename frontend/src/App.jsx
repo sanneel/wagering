@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import ProtectedRoute from './components/ProtectedRoute'
 import GeoBlocked from './components/GeoBlocked'
+import AgeGate from './components/AgeGate'
 import Landing from './pages/Landing'
+import Legal from './pages/Legal'
 import AuthCallback from './pages/AuthCallback'
 import Dashboard from './pages/Dashboard'
 import Tables from './pages/Tables'
@@ -27,9 +29,11 @@ export default function App() {
   }
 
   return (
-    <Routes>
-      <Route path="/" element={<Landing />} />
-      <Route path="/auth/callback" element={<AuthCallback />} />
+    <AgeGate>
+      <Routes>
+        <Route path="/" element={<Landing />} />
+        <Route path="/legal" element={<Legal />} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
       <Route
         path="/dashboard"
         element={
@@ -86,8 +90,9 @@ export default function App() {
           </ProtectedRoute>
         }
       />
-      {/* Unknown routes fall back to the landing page. */}
-      <Route path="*" element={<Landing />} />
-    </Routes>
+        {/* Unknown routes fall back to the landing page. */}
+        <Route path="*" element={<Landing />} />
+      </Routes>
+    </AgeGate>
   )
 }
